@@ -805,6 +805,126 @@ textarea {
   background: #eef2ff;
 }
 
+.recommendations-panel {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.recommendations-panel h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.recommendation-list {
+  display: grid;
+  gap: 7px;
+}
+
+.recommendation-filters {
+  display: grid;
+  gap: 8px;
+}
+
+.recommendation-search {
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  color: #1e293b;
+  background: #fff;
+}
+
+.recommendation-search:focus {
+  outline: 2px solid rgba(37, 99, 235, 0.25);
+  border-color: #60a5fa;
+}
+
+.recommendation-type-filter {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.recommendation-day-filter {
+  max-width: 220px;
+}
+
+.recommendation-item {
+  border: 1px solid #cbd5e1;
+  border-left: 4px solid #2563eb;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 10px 12px;
+  display: grid;
+  gap: 7px;
+}
+
+.recommendation-item.section {
+  border-left-color: #d97706;
+  background: linear-gradient(180deg, #ffffff 0%, #fffbeb 100%);
+}
+
+.recommendation-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.recommendation-head strong {
+  color: #0f172a;
+  font-size: 0.86rem;
+}
+
+.recommendation-type {
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.recommendation-type.lecture {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.recommendation-type.section {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.recommendation-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.recommendation-chip {
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 0.74rem;
+  color: #334155;
+  background: #ffffff;
+}
+
+.recommendation-chip.day {
+  background: #f1f5f9;
+}
+
+.recommendation-chip.time {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.recommendation-chip.group {
+  background: #f8fafc;
+}
+
 .dot {
   width: 10px;
   height: 10px;

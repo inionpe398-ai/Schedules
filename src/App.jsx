@@ -137,6 +137,14 @@ function slotStartMinutes(slotLabel) {
   return timeToMinutes(parts[0].trim());
 }
 
+function formatSessionTimeLabel(rawTime, format) {
+  const [startRaw, endRaw] = String(rawTime || "")
+    .split("-")
+    .map((part) => part.trim());
+  if (!startRaw || !endRaw) return String(rawTime || "");
+  return formatSlotLabel(`${startRaw} - ${endRaw}`, format);
+}
+
 function AppBody() {
   const [courses, setCourses] = useState([]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -150,6 +158,9 @@ function AppBody() {
   const [registrationView, setRegistrationView] = useState("lectures");
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [rankingCriterion, setRankingCriterion] = useState("balanced");
+  const [recommendSearch, setRecommendSearch] = useState("");
+  const [recommendTypeFilter, setRecommendTypeFilter] = useState("all");
+  const [recommendDayFilter, setRecommendDayFilter] = useState("all");
   const [timeFormat, setTimeFormat] = useState(() => {
     const saved = localStorage.getItem(TIME_FORMAT_KEY);
     return saved === "12h" ? "12h" : "24h";
@@ -340,7 +351,7 @@ function AppBody() {
           const endIndex = busy ? i - 1 : i;
           const startText = TIME_SLOTS[start].split("-")[0].trim();
           const endText = TIME_SLOTS[endIndex].split("-")[1].trim();
-          blocks.push(`${startText} - ${endText}`);
+          blocks.push(formatSessionTimeLabel(`${startText} - ${endText}`, "12h"));
           start = null;
         }
       }
@@ -348,6 +359,100 @@ function AppBody() {
     }
     return result;
   }, [tableSessions]);
+
+  const recommendationItems = useMemo(() => {
+    if (!tableSessions.length) return [];
+
+    const occupied = new Map(DAYS.map((d) => [d, new Set()]));
+    for (const s of tableSessions) {
+      const day = normalizeDay(s);
+      const range = slotRange(s);
+      if (!occupied.has(day) || !range) continue;
+      for (let i = range.start; i < range.end; i += 1) occupied.get(day).add(i);
+    }
+
+    const freeRangesByDay = new Map();
+    for (const day of DAYS) {
+      const used = occupied.get(day) || new Set();
+      if (!used.size) continue;
+      const ranges = [];
+      let start = null;
+
+      for (let i = 0; i < TIME_SLOTS.length; i += 1) {
+        const busy = used.has(i);
+        if (!busy && start == null) start = i;
+        if ((busy || i === TIME_SLOTS.length - 1) && start != null) {
+          const end = busy ? i : i + 1;
+          ranges.push({ start, end });
+          start = null;
+        }
+      }
+      freeRangesByDay.set(day, ranges);
+    }
+
+    const existingSessionKeys = new Set(
+      tableSessions.map((s) => `${normalizeDay(s)}|${s.Time}|${s.courseId || s.courseName}|${s.GroupId}`)
+    );
+    const dayIndex = new Map(DAYS.map((day, idx) => [day, idx]));
+    const out = [];
+
+    for (const course of courses) {
+      for (const session of course.sessions) {
+        const day = normalizeDay(session);
+        const freeRanges = freeRangesByDay.get(day) || [];
+        if (!freeRanges.length) continue;
+
+        const range = slotRange(session);
+        if (!range) continue;
+
+        const key = `${day}|${session.Time}|${course.id}|${session.GroupId}`;
+        if (existingSessionKeys.has(key)) continue;
+
+        const fitsFreeBlock = freeRanges.some((freeRange) => range.start >= freeRange.start && range.end <= freeRange.end);
+        if (!fitsFreeBlock) continue;
+
+        out.push({
+          key,
+          day,
+          start: range.start,
+          time: session.Time,
+          type: isSubgroup(session.Type) ? "section" : "lecture",
+          typeLabel: isSubgroup(session.Type) ? "Section" : "Lecture",
+          courseName: course.name,
+          groupName: session.GroupName || `Group ${session.GroupId}`,
+        });
+      }
+    }
+
+    out.sort((a, b) => {
+      const byDay = (dayIndex.get(a.day) ?? 999) - (dayIndex.get(b.day) ?? 999);
+      if (byDay !== 0) return byDay;
+      if (a.start !== b.start) return a.start - b.start;
+      return a.courseName.localeCompare(b.courseName);
+    });
+
+    return out.slice(0, 30);
+  }, [tableSessions, courses]);
+
+  const filteredRecommendationItems = useMemo(() => {
+    const search = recommendSearch.trim().toLowerCase();
+    return recommendationItems.filter((item) => {
+      if (recommendTypeFilter !== "all" && item.type !== recommendTypeFilter) return false;
+      if (recommendDayFilter !== "all" && item.day !== recommendDayFilter) return false;
+      if (!search) return true;
+
+      const haystack = [
+        item.day,
+        item.time,
+        item.typeLabel,
+        item.courseName,
+        item.groupName,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(search);
+    });
+  }, [recommendationItems, recommendSearch, recommendTypeFilter, recommendDayFilter]);
 
   function evaluateSchedule(sessions) {
     const occupied = new Map(DAYS.map((d) => [d, new Set()]));
@@ -1042,6 +1147,86 @@ function AppBody() {
                   <p className="muted score-line">
                     Analytics is disabled while All Lectures/All Sections preview is active.
                   </p>
+                )}
+
+                {tableSessions.length > 0 && (
+                  <div className="recommendations-panel">
+                    <h3>
+                      Recommendations
+                      {globalTrackPick ? ` for ${globalTrackPick}` : ""}
+                    </h3>
+                    <div className="recommendation-filters">
+                      <input
+                        type="search"
+                        className="recommendation-search"
+                        value={recommendSearch}
+                        onChange={(e) => setRecommendSearch(e.target.value)}
+                        placeholder="Search course, group, time..."
+                      />
+                      <div className="recommendation-type-filter">
+                        <button
+                          type="button"
+                          className={`mini ${recommendTypeFilter === "lecture" ? "on" : ""}`}
+                          onClick={() => setRecommendTypeFilter("lecture")}
+                        >
+                          Lectures
+                        </button>
+                        <button
+                          type="button"
+                          className={`mini ${recommendTypeFilter === "section" ? "on" : ""}`}
+                          onClick={() => setRecommendTypeFilter("section")}
+                        >
+                          Sections
+                        </button>
+                        <button
+                          type="button"
+                          className={`mini ${recommendTypeFilter === "all" ? "on" : ""}`}
+                          onClick={() => setRecommendTypeFilter("all")}
+                        >
+                          All
+                        </button>
+                      </div>
+                      <select
+                        className="track-select recommendation-day-filter"
+                        value={recommendDayFilter}
+                        onChange={(e) => setRecommendDayFilter(e.target.value)}
+                      >
+                        <option value="all">All Days</option>
+                        {DAYS.map((day) => (
+                          <option key={`recommend-day-${day}`} value={day}>
+                            {day}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {filteredRecommendationItems.length > 0 ? (
+                      <div className="recommendation-list">
+                        {filteredRecommendationItems.map((item) => (
+                          <article
+                            key={`recommend-${item.key}`}
+                            className={`recommendation-item ${item.type === "section" ? "section" : "lecture"}`}
+                          >
+                            <div className="recommendation-head">
+                              <strong>{item.courseName}</strong>
+                              <span className={`recommendation-type ${item.type}`}>{item.typeLabel}</span>
+                            </div>
+                            <div className="recommendation-meta">
+                              <span className="recommendation-chip day">{item.day}</span>
+                              <span className="recommendation-chip time">
+                                {formatSessionTimeLabel(item.time, timeFormat)}
+                              </span>
+                              <span className="recommendation-chip group">{item.groupName}</span>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted score-line">
+                        No recommendations match your current filters.
+                      </p>
+                    )}
+                  </div>
                 )}
               </>
             )}
