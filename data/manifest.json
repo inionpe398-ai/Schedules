@@ -1,0 +1,12 @@
+﻿{
+  "files": [
+    "Infection.json",
+    "Micro.json",
+    "Operative.json",
+    "Oral Public.json",
+    "Patho.json",
+    "Pharma.json",
+    "Pyschological.json",
+    "Remove.json"
+  ]
+}
