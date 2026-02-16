@@ -148,7 +148,7 @@ function AppBody() {
   const [globalTrackPick, setGlobalTrackPick] = useState("");
   const [globalTrack, setGlobalTrack] = useState(null);
   const [registrationView, setRegistrationView] = useState("lectures");
-  const [showFreeTime, setShowFreeTime] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
   const [rankingCriterion, setRankingCriterion] = useState("balanced");
   const [timeFormat, setTimeFormat] = useState(() => {
     const saved = localStorage.getItem(TIME_FORMAT_KEY);
@@ -290,7 +290,8 @@ function AppBody() {
   const activePreviewCount =
     Object.values(preview).filter((p) => p?.lectures || p?.subgroups).length + (globalTrack ? 1 : 0);
   const hasAllPreviewMode = Object.values(preview).some((p) => p?.lectures || p?.subgroups);
-  const scoreEnabled = !hasAllPreviewMode && (registrations.length > 0 || Boolean(globalTrack));
+  const scoreEnabled = !hasAllPreviewMode && courses.length > 0;
+  const hasBuiltSchedule = tableSessions.length > 0 || Boolean(globalTrackPick);
 
   const globalSubgroupOptions = useMemo(() => {
     const names = new Set();
@@ -329,6 +330,7 @@ function AppBody() {
     const result = new Map();
     for (const day of DAYS) {
       const used = occupied.get(day) || new Set();
+      if (!used.size) continue;
       const blocks = [];
       let start = null;
       for (let i = 0; i < TIME_SLOTS.length; i += 1) {
@@ -349,16 +351,21 @@ function AppBody() {
 
   function evaluateSchedule(sessions) {
     const occupied = new Map(DAYS.map((d) => [d, new Set()]));
+    const lateSessions = new Set();
     for (const s of sessions) {
       const day = normalizeDay(s);
       const range = slotRange(s);
       if (!occupied.has(day) || !range) continue;
       for (let i = range.start; i < range.end; i += 1) occupied.get(day).add(i);
+      const startMin = slotStartByIndex[range.start];
+      if ((startMin ?? -1) >= 16 * 60) {
+        const key = `${day}|${s.courseId || s.courseName}|${s.GroupId}|${s.Time}`;
+        lateSessions.add(key);
+      }
     }
 
     let activeDays = 0;
     let gapSlots = 0;
-    let after4Slots = 0;
 
     for (const day of DAYS) {
       const used = Array.from(occupied.get(day) || []).sort((a, b) => a - b);
@@ -369,21 +376,18 @@ function AppBody() {
       for (let i = first; i <= last; i += 1) {
         if (!occupied.get(day).has(i)) gapSlots += 1;
       }
-      for (const idx of used) {
-        const startMin = slotStartByIndex[idx];
-        if ((startMin ?? -1) >= 16 * 60) after4Slots += 1;
-      }
     }
 
+    const after4Sessions = lateSessions.size;
     const scoreDays = Math.max(0, 100 - Math.max(0, activeDays - 1) * 18);
     const scoreGaps = Math.max(0, 100 - gapSlots * 10);
-    const scoreLate = Math.max(0, 100 - after4Slots * 16);
+    const scoreLate = Math.max(0, 100 - after4Sessions * 24);
     const overall = Math.round(scoreDays * 0.4 + scoreGaps * 0.35 + scoreLate * 0.25);
 
     return {
       activeDays,
       gapSlots,
-      after4Slots,
+      after4Sessions,
       scoreDays,
       scoreGaps,
       scoreLate,
@@ -440,16 +444,12 @@ function AppBody() {
     sorted.sort((a, b) => {
       if (rankingCriterion === "days") return a.score.activeDays - b.score.activeDays || b.score.overall - a.score.overall;
       if (rankingCriterion === "gaps") return a.score.gapSlots - b.score.gapSlots || b.score.overall - a.score.overall;
-      if (rankingCriterion === "late") return a.score.after4Slots - b.score.after4Slots || b.score.overall - a.score.overall;
+      if (rankingCriterion === "late")
+        return a.score.after4Sessions - b.score.after4Sessions || b.score.overall - a.score.overall;
       return b.score.overall - a.score.overall;
     });
     return sorted;
   }, [allTrackCandidates, rankingCriterion]);
-
-  const selectedTrackStats = useMemo(
-    () => rankedTrackCandidates.find((c) => c.name === globalTrackPick) || null,
-    [rankedTrackCandidates, globalTrackPick]
-  );
 
   function showNotice(type, title, message) {
     setNotice({ type, title, message });
@@ -593,20 +593,17 @@ function AppBody() {
     }
   }
 
-  function downloadSchedulePdf() {
+  function downloadScheduleScreenshot() {
     if (!scheduleRef.current) return;
 
-    const exportPdf = async () => {
+    const exportSchedule = async () => {
       let snapshotRoot = null;
       try {
-        const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-          import("html2canvas"),
-          import("jspdf"),
-        ]);
+        const { default: html2canvas } = await import("html2canvas");
 
         const sourceTable = scheduleRef.current.querySelector(".timetable");
         if (!sourceTable) {
-          showNotice("error", "PDF Export", "Could not find timetable to export.");
+          showNotice("error", "Download Schedule", "Could not find timetable to capture.");
           return;
         }
 
@@ -619,133 +616,97 @@ function AppBody() {
         snapshotRoot.style.width = `${sourceTable.scrollWidth + 36}px`;
         snapshotRoot.style.zIndex = "-1";
 
-        const title = document.createElement("h1");
-        title.textContent = printTitle;
-        title.style.margin = "0 0 12px";
-        title.style.fontSize = "42px";
-        title.style.fontWeight = "800";
-        title.style.color = "#1d4ed8";
-        title.style.lineHeight = "1.1";
-
         const tableClone = sourceTable.cloneNode(true);
         tableClone.style.overflow = "visible";
         tableClone.style.width = "max-content";
+        tableClone.style.background = "#ffffff";
+
+        tableClone.querySelectorAll(".timetable, .day-row, .day-grid, .slot-cell").forEach((el) => {
+          el.style.background = "#ffffff";
+          el.style.backgroundColor = "#ffffff";
+          el.style.backgroundImage = "none";
+          el.style.filter = "none";
+          el.style.opacity = "1";
+        });
+        tableClone.querySelectorAll(".slot-cell").forEach((el, idx, arr) => {
+          el.style.boxShadow = "none";
+          el.style.borderRight = idx === arr.length - 1 ? "0" : "1px solid #e2e8f0";
+        });
 
         const exportStyle = document.createElement("style");
         exportStyle.textContent = `
-          .timetable {
-            border: 1px solid #cbd5e1 !important;
-            border-radius: 10px !important;
-            overflow: visible !important;
-            background: #ffffff !important;
-          }
-          .time-header,
-          .day-row {
-            min-width: 0 !important;
-          }
-          .time-header {
-            background: #eef2ff !important;
-          }
-          .day-label {
-            background: #f8fafc !important;
-            color: #1e293b !important;
-          }
-          .day-grid {
-            grid-template-rows: 170px !important;
-            height: 170px !important;
-            min-height: 170px !important;
-            max-height: 170px !important;
-            background: #ffffff !important;
-            border-top: 1px solid #dbe3ef !important;
-            border-right: 1px solid #dbe3ef !important;
-            box-shadow: none !important;
-          }
+          .timetable,
+          .day-grid,
           .slot-cell {
             background: #ffffff !important;
-            box-shadow: inset -1px 0 0 #e2e8f0 !important;
-            opacity: 1 !important;
+            background-color: #ffffff !important;
           }
-          .slot-cell::before,
-          .slot-cell::after,
+          .slot-cell {
+            opacity: 1 !important;
+            box-shadow: inset -1px 0 0 #e2e8f0 !important;
+          }
           .day-grid::before,
           .day-grid::after,
-          .timetable::before,
-          .timetable::after {
+          .slot-cell::before,
+          .slot-cell::after {
             content: none !important;
             display: none !important;
           }
-          .lesson {
-            margin: 5px !important;
-            height: 160px !important;
-            max-height: 160px !important;
-            border-radius: 10px !important;
-          }
-          .lesson-content {
-            overflow: hidden !important;
-            font-size: 12px !important;
-            line-height: 1.25 !important;
-          }
-          .time-cell,
-          .corner {
-            font-size: 11px !important;
-          }
         `;
-
         snapshotRoot.appendChild(exportStyle);
-        snapshotRoot.appendChild(title);
         snapshotRoot.appendChild(tableClone);
         document.body.appendChild(snapshotRoot);
 
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 
-        const targetScale = Math.max(3, Math.min(window.devicePixelRatio || 1, 4));
+        const targetScale = Math.max(2, Math.min(window.devicePixelRatio || 1, 3));
         const canvas = await html2canvas(snapshotRoot, {
           backgroundColor: "#ffffff",
           scale: targetScale,
           useCORS: true,
           imageTimeout: 0,
+          onclone: (clonedDoc) => {
+            clonedDoc
+              .querySelectorAll(".timetable, .day-row, .day-grid, .slot-cell")
+              .forEach((el) => {
+                el.style.setProperty("background", "#ffffff", "important");
+                el.style.setProperty("background-color", "#ffffff", "important");
+                el.style.setProperty("background-image", "none", "important");
+                el.style.setProperty("opacity", "1", "important");
+                el.style.setProperty("filter", "none", "important");
+              });
+
+            clonedDoc.querySelectorAll(".slot-cell").forEach((el, idx, arr) => {
+              el.style.setProperty("box-shadow", "none", "important");
+              el.style.setProperty(
+                "border-right",
+                idx === arr.length - 1 ? "0" : "1px solid #e2e8f0",
+                "important"
+              );
+            });
+          },
         });
 
-        const imgData = canvas.toDataURL("image/png", 1.0);
-        const pdf = new jsPDF({
-          orientation: canvas.width >= canvas.height ? "landscape" : "portrait",
-          unit: "px",
-          format: [canvas.width, canvas.height],
-        });
-
-        pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height, undefined, "NONE");
-        const pdfBlob = pdf.output("blob");
-        const blobUrl = URL.createObjectURL(pdfBlob);
-        const opened = window.open(blobUrl, "_blank", "noopener,noreferrer");
-        if (!opened) {
-          showNotice("error", "PDF Export", "Could not open PDF tab. Allow pop-ups and try again.");
-        } else {
-          showNotice("success", "PDF Ready", "PDF opened in a new tab.");
-        }
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+        const dataUrl = canvas.toDataURL("image/png", 1.0);
+        const link = document.createElement("a");
+        link.href = dataUrl;
+        link.download = `${printTitle.replace(/\s+/g, "-").toLowerCase()}-schedule.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showNotice("success", "Download Schedule", "Schedule screenshot downloaded.");
       } catch (err) {
-        showNotice("error", "PDF Export", err?.message || "Failed to export schedule PDF.");
+        showNotice("error", "Download Schedule", err?.message || "Failed to capture schedule.");
       } finally {
         if (snapshotRoot?.parentNode) snapshotRoot.parentNode.removeChild(snapshotRoot);
       }
     };
 
-    exportPdf();
+    exportSchedule();
   }
 
   return (
     <div className={`app ${tableOnly ? "table-only" : ""}`}>
-      <header className="header">
-        <div className="header-main">
-          <h1>University Schedule Manager</h1>
-          <p>Organize courses, sections, and tracks with conflict-safe planning.</p>
-        </div>
-        <div className="header-stats">
-          <span className="stat-pill">Registered: {registeredCount}</span>
-          <span className="stat-pill">Previews: {activePreviewCount}</span>
-        </div>
-      </header>
-
       {error && <div className="error">{error}</div>}
       {notice && (
         <div className={`notice ${notice.type}`}>
@@ -931,8 +892,8 @@ function AppBody() {
               <button className="btn secondary" type="button" onClick={toggleFullscreen}>
                 Full Screen
               </button>
-              <button className="btn secondary" type="button" onClick={downloadSchedulePdf}>
-                Download PDF
+              <button className="btn secondary" type="button" onClick={downloadScheduleScreenshot}>
+                Download Schedule
               </button>
               <button className="btn secondary" type="button" onClick={clearAll}>
                 Clear All
@@ -996,81 +957,93 @@ function AppBody() {
 
           <div className="insights-panel">
             <div className="insights-actions">
-              <button className="mini" type="button" onClick={() => setShowFreeTime((v) => !v)}>
-                {showFreeTime ? "Hide Free Time" : "Show Free Time"}
+              <button className="mini analytics-btn" type="button" onClick={() => setShowAnalytics((v) => !v)}>
+                <span className="analytics-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                    <path
+                      d="M4 19h16M7 16V8m5 8V5m5 11v-6"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </span>
+                {showAnalytics ? "Hide Analytics" : "Analytics"}
               </button>
             </div>
 
-            {showFreeTime && (
-              <div className="free-time-grid">
-                {DAYS.map((day) => {
-                  const blocks = freeTimeByDay.get(day) || [];
-                  return (
-                    <div key={`free-${day}`} className="free-day">
-                      <strong>{day}</strong>
-                      <p>{blocks.length ? blocks.join(" | ") : "No free slots"}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            {showAnalytics && (
+              <>
+                {tableSessions.length > 0 && (
+                  <div className="free-time-grid">
+                    {Array.from(freeTimeByDay.keys()).map((day) => {
+                      const blocks = freeTimeByDay.get(day) || [];
+                      return (
+                        <div key={`free-${day}`} className="free-day">
+                          <strong>{day}</strong>
+                          <p>{blocks.length ? blocks.join(" | ") : "No free slots"}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
 
-            {scoreEnabled && (
-              <div className="score-panel">
-                <div className="score-header">
-                  <h3>Schedule Score: {currentScheduleScore.overall}/100</h3>
-                  <select
-                    className="track-select"
-                    value={rankingCriterion}
-                    onChange={(e) => setRankingCriterion(e.target.value)}
-                  >
-                    <option value="balanced">Best Overall</option>
-                    <option value="days">Fewest Days</option>
-                    <option value="gaps">Fewest Gaps</option>
-                    <option value="late">No Sessions After 4 PM</option>
-                  </select>
-                </div>
-                <p className="muted score-line">
-                  Days: {currentScheduleScore.activeDays} | Gaps: {currentScheduleScore.gapSlots} | After 4 PM:{" "}
-                  {currentScheduleScore.after4Slots}
-                </p>
-                {!globalTrackPick && (
-                  <div className="ranked-tracks">
-                    {rankedTrackCandidates.slice(0, 6).map((c) => (
-                      <button
-                        key={`rank-${c.name}`}
-                        type="button"
-                        className={`rank-item ${globalTrackPick === c.name ? "active" : ""}`}
-                        onClick={() => applyRankedTrack(c.name)}
+                {scoreEnabled && hasBuiltSchedule && (
+                  <div className="score-panel highlight">
+                    <div className="score-header">
+                      <h3>{globalTrackPick ? `${globalTrackPick} Analytics` : "Current Schedule Analytics"}</h3>
+                    </div>
+                    <div className="metric-badges">
+                      <span className="metric-badge overall">Score {currentScheduleScore.overall}/100</span>
+                      <span className="metric-badge days">Days {currentScheduleScore.activeDays}</span>
+                      <span className="metric-badge gaps">Gaps {currentScheduleScore.gapSlots}</span>
+                      <span className="metric-badge late">After 4 PM {currentScheduleScore.after4Sessions}</span>
+                    </div>
+                  </div>
+                )}
+
+                {scoreEnabled && !hasBuiltSchedule && (
+                  <div className="score-panel">
+                    <div className="score-header">
+                      <h3>Section Ranking Analytics</h3>
+                      <select
+                        className="track-select"
+                        value={rankingCriterion}
+                        onChange={(e) => setRankingCriterion(e.target.value)}
                       >
-                        <span>{c.name}</span>
-                        <small>
-                          Score {c.score.overall} | Days {c.score.activeDays} | Gaps {c.score.gapSlots} | After 4:{" "}
-                          {c.score.after4Slots}
-                        </small>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {globalTrackPick && selectedTrackStats && (
-                  <div className="ranked-tracks">
-                    <div className="rank-item active">
-                      <span>{selectedTrackStats.name}</span>
-                      <small>
-                        Score {selectedTrackStats.score.overall} | Days {selectedTrackStats.score.activeDays} | Gaps{" "}
-                        {selectedTrackStats.score.gapSlots} | After 4: {selectedTrackStats.score.after4Slots}
-                      </small>
+                        <option value="balanced">Best Overall</option>
+                        <option value="days">Fewest Days</option>
+                        <option value="gaps">Fewest Gaps</option>
+                        <option value="late">No Sessions After 4 PM</option>
+                      </select>
+                    </div>
+                    <div className="ranked-tracks">
+                      {rankedTrackCandidates.slice(0, 10).map((c) => (
+                        <button
+                          key={`rank-${c.name}`}
+                          type="button"
+                          className={`rank-item ${globalTrackPick === c.name ? "active" : ""}`}
+                          onClick={() => applyRankedTrack(c.name)}
+                        >
+                          <span>{c.name}</span>
+                          <small>
+                            Score {c.score.overall} | Days {c.score.activeDays} | Gaps {c.score.gapSlots} | After 4:{" "}
+                            {c.score.after4Sessions}
+                          </small>
+                        </button>
+                      ))}
                     </div>
                   </div>
                 )}
-              </div>
-            )}
 
-            {!scoreEnabled && (
-              <p className="muted score-line">
-                Schedule ranking is available for Registration and Section Track only (not All Lectures/All Sections
-                preview).
-              </p>
+                {!scoreEnabled && (
+                  <p className="muted score-line">
+                    Analytics is disabled while All Lectures/All Sections preview is active.
+                  </p>
+                )}
+              </>
             )}
           </div>
 
