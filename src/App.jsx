@@ -131,9 +131,9 @@ function AppBody() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState(null);
   const [tableOnly, setTableOnly] = useState(false);
-  const [controlTab, setControlTab] = useState("courses");
   const [globalTrackPick, setGlobalTrackPick] = useState("");
   const [globalTrack, setGlobalTrack] = useState(null);
+  const [registrationView, setRegistrationView] = useState("lectures");
   const [timeFormat, setTimeFormat] = useState(() => {
     const saved = localStorage.getItem(TIME_FORMAT_KEY);
     return saved === "12h" ? "12h" : "24h";
@@ -184,10 +184,27 @@ function AppBody() {
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
+  useEffect(() => {
+    if (!notice) return undefined;
+    const timer = setTimeout(() => setNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
   const selectedCourse = coursesById.get(selectedCourseId);
   const selectedGroups = selectedCourse ? collectGroups(selectedCourse) : [];
   const lectureGroups = selectedGroups.filter((g) => isLecture(g.type));
   const subgroupGroups = selectedGroups.filter((g) => isSubgroup(g.type));
+  const groupsByCourseId = useMemo(() => {
+    const map = new Map();
+    for (const course of courses) {
+      const groups = collectGroups(course);
+      map.set(course.id, {
+        lectures: groups.filter((g) => isLecture(g.type)),
+        subgroups: groups.filter((g) => isSubgroup(g.type)),
+      });
+    }
+    return map;
+  }, [courses]);
 
   const currentForCourse = registrations.find((r) => r.courseId === selectedCourseId);
   const currentLectureId = currentForCourse?.selectedGroupIds?.find((id) => lectureGroups.some((g) => g.id === id)) || "";
@@ -257,7 +274,8 @@ function AppBody() {
     return output;
   }, [registeredSessions, globalTrackSessions, previewSessions]);
   const registeredCount = registrations.length;
-  const activePreviewCount = Object.values(preview).filter((p) => p?.lectures || p?.subgroups).length;
+  const activePreviewCount =
+    Object.values(preview).filter((p) => p?.lectures || p?.subgroups).length + (globalTrack ? 1 : 0);
 
   const globalSubgroupOptions = useMemo(() => {
     const names = new Set();
@@ -271,6 +289,16 @@ function AppBody() {
     }
     return Array.from(names).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }, [courses]);
+
+  const printTitle = useMemo(() => {
+    if (globalTrack?.selectedSubgroup) {
+      return `${globalTrack.selectedSubgroup} Schedule`;
+    }
+    if (selectedCourse?.name) {
+      return `${selectedCourse.name} Sections`;
+    }
+    return "Weekly Schedule";
+  }, [globalTrack, selectedCourse]);
 
   function showNotice(type, title, message) {
     setNotice({ type, title, message });
@@ -357,15 +385,17 @@ function AppBody() {
   }
 
   function togglePreview(courseId, key) {
-    setPreview((prev) => {
-      const current = prev[courseId] || { lectures: false, subgroups: false };
-      return {
-        ...prev,
-        [courseId]: {
-          ...current,
-          [key]: !current[key],
-        },
-      };
+    const current = preview[courseId] || { lectures: false, subgroups: false };
+    if (current[key]) {
+      setPreview({});
+      return;
+    }
+    setGlobalTrack(null);
+    setPreview({
+      [courseId]: {
+        lectures: key === "lectures",
+        subgroups: key === "subgroups",
+      },
     });
   }
 
@@ -387,7 +417,7 @@ function AppBody() {
       prefix,
       selectedSubgroup: selectedName,
     });
-    showNotice("success", "Section Track Enabled", `Showing lectures ${prefix} + section ${selectedName} across all courses.`);
+    setPreview({});
   }
 
   function clearGlobalSectionTrack() {
@@ -409,6 +439,146 @@ function AppBody() {
     } catch {
       setTableOnly(false);
     }
+  }
+
+  function downloadSchedulePdf() {
+    if (!scheduleRef.current) return;
+
+    const exportPdf = async () => {
+      let snapshotRoot = null;
+      try {
+        const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+          import("html2canvas"),
+          import("jspdf"),
+        ]);
+
+        const sourceTable = scheduleRef.current.querySelector(".timetable");
+        if (!sourceTable) {
+          showNotice("error", "PDF Export", "Could not find timetable to export.");
+          return;
+        }
+
+        snapshotRoot = document.createElement("div");
+        snapshotRoot.style.position = "fixed";
+        snapshotRoot.style.left = "-100000px";
+        snapshotRoot.style.top = "0";
+        snapshotRoot.style.background = "#ffffff";
+        snapshotRoot.style.padding = "18px";
+        snapshotRoot.style.width = `${sourceTable.scrollWidth + 36}px`;
+        snapshotRoot.style.zIndex = "-1";
+
+        const title = document.createElement("h1");
+        title.textContent = printTitle;
+        title.style.margin = "0 0 12px";
+        title.style.fontSize = "42px";
+        title.style.fontWeight = "800";
+        title.style.color = "#1d4ed8";
+        title.style.lineHeight = "1.1";
+
+        const tableClone = sourceTable.cloneNode(true);
+        tableClone.style.overflow = "visible";
+        tableClone.style.width = "max-content";
+
+        const exportStyle = document.createElement("style");
+        exportStyle.textContent = `
+          .timetable {
+            border: 1px solid #cbd5e1 !important;
+            border-radius: 10px !important;
+            overflow: visible !important;
+            background: #ffffff !important;
+          }
+          .time-header,
+          .day-row {
+            min-width: 0 !important;
+          }
+          .time-header {
+            background: #eef2ff !important;
+          }
+          .day-label {
+            background: #f8fafc !important;
+            color: #1e293b !important;
+          }
+          .day-grid {
+            grid-template-rows: 170px !important;
+            height: 170px !important;
+            min-height: 170px !important;
+            max-height: 170px !important;
+            background: #ffffff !important;
+            border-top: 1px solid #dbe3ef !important;
+            border-right: 1px solid #dbe3ef !important;
+            box-shadow: none !important;
+          }
+          .slot-cell {
+            background: #ffffff !important;
+            box-shadow: inset -1px 0 0 #e2e8f0 !important;
+            opacity: 1 !important;
+          }
+          .slot-cell::before,
+          .slot-cell::after,
+          .day-grid::before,
+          .day-grid::after,
+          .timetable::before,
+          .timetable::after {
+            content: none !important;
+            display: none !important;
+          }
+          .lesson {
+            margin: 5px !important;
+            height: 160px !important;
+            max-height: 160px !important;
+            border-radius: 10px !important;
+          }
+          .lesson-content {
+            overflow: hidden !important;
+            font-size: 12px !important;
+            line-height: 1.25 !important;
+          }
+          .time-cell,
+          .corner {
+            font-size: 11px !important;
+          }
+        `;
+
+        snapshotRoot.appendChild(exportStyle);
+        snapshotRoot.appendChild(title);
+        snapshotRoot.appendChild(tableClone);
+        document.body.appendChild(snapshotRoot);
+
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+        const targetScale = Math.max(3, Math.min(window.devicePixelRatio || 1, 4));
+        const canvas = await html2canvas(snapshotRoot, {
+          backgroundColor: "#ffffff",
+          scale: targetScale,
+          useCORS: true,
+          imageTimeout: 0,
+        });
+
+        const imgData = canvas.toDataURL("image/png", 1.0);
+        const pdf = new jsPDF({
+          orientation: canvas.width >= canvas.height ? "landscape" : "portrait",
+          unit: "px",
+          format: [canvas.width, canvas.height],
+        });
+
+        pdf.addImage(imgData, "PNG", 0, 0, canvas.width, canvas.height, undefined, "NONE");
+        const pdfBlob = pdf.output("blob");
+        const blobUrl = URL.createObjectURL(pdfBlob);
+        const opened = window.open(blobUrl, "_blank", "noopener,noreferrer");
+        if (!opened) {
+          showNotice("error", "PDF Export", "Could not open PDF tab. Allow pop-ups and try again.");
+        } else {
+          showNotice("success", "PDF Ready", "PDF opened in a new tab.");
+        }
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 60000);
+      } catch (err) {
+        showNotice("error", "PDF Export", err?.message || "Failed to export schedule PDF.");
+      } finally {
+        if (snapshotRoot?.parentNode) snapshotRoot.parentNode.removeChild(snapshotRoot);
+      }
+    };
+
+    exportPdf();
   }
 
   return (
@@ -439,31 +609,31 @@ function AppBody() {
 
       <main className="workspace">
         <aside className="control-rail">
-          <div className="rail-tabs">
-            <button
-              type="button"
-              className={`rail-tab ${controlTab === "courses" ? "active" : ""}`}
-              onClick={() => setControlTab("courses")}
-            >
-              Courses
-            </button>
-            <button
-              type="button"
-              className={`rail-tab ${controlTab === "registration" ? "active" : ""}`}
-              onClick={() => setControlTab("registration")}
-            >
-              Registration
-            </button>
-          </div>
-
-          <section className={`panel courses-panel ${controlTab === "courses" ? "show" : "hide-mobile"}`}>
+          <section className="panel courses-panel">
             <h2>Courses</h2>
             <div className="course-list">
               {courses.map((course) => {
                 const p = preview[course.id] || { lectures: false, subgroups: false };
+                const split = groupsByCourseId.get(course.id) || { lectures: [], subgroups: [] };
+                const expanded = selectedCourseId === course.id;
                 return (
-                  <div key={course.id} className={`course-card ${selectedCourseId === course.id ? "active" : ""}`}>
-                    <button className="course-name" onClick={() => setSelectedCourseId(course.id)} type="button">
+                  <div key={course.id} className={`course-card ${expanded ? "active expanded" : ""}`}>
+                    <button
+                      className="course-name"
+                      onClick={() => {
+                        if (expanded) {
+                          setSelectedCourseId("");
+                          return;
+                        }
+                        setSelectedCourseId(course.id);
+                        if (split.lectures.length > 0) {
+                          setRegistrationView("lectures");
+                        } else if (split.subgroups.length > 0) {
+                          setRegistrationView("subgroups");
+                        }
+                      }}
+                      type="button"
+                    >
                       {course.name}
                     </button>
                     <div className="course-actions">
@@ -493,75 +663,78 @@ function AppBody() {
                         </button>
                       )}
                     </div>
+                    {expanded && (
+                      <form onSubmit={registerSelection} className="reg-form inline-registration">
+                        <div className="registration-switcher" role="tablist" aria-label="Registration view">
+                          <button
+                            type="button"
+                            className={`switch-btn ${registrationView === "lectures" ? "active" : ""}`}
+                            onClick={() => setRegistrationView("lectures")}
+                          >
+                            Groups {lectureGroups.length}
+                          </button>
+                          {subgroupGroups.length > 0 && (
+                            <button
+                              type="button"
+                              className={`switch-btn ${registrationView === "subgroups" ? "active" : ""}`}
+                              onClick={() => setRegistrationView("subgroups")}
+                            >
+                              Sub Groups {subgroupGroups.length}
+                            </button>
+                          )}
+                        </div>
+
+                        {registrationView === "lectures" && (
+                          <div className="group-box">
+                            <h4>Lecture Group (one required)</h4>
+                            {lectureGroups.map((g) => (
+                              <label key={g.id} className="group-item">
+                                <input
+                                  type="radio"
+                                  name="lecture"
+                                  value={g.id}
+                                  checked={Number(lecturePick) === g.id}
+                                  onChange={(ev) => setLecturePick(Number(ev.target.value))}
+                                />
+                                <span>
+                                  <strong>{g.name}</strong> ({g.type})
+                                </span>
+                                <small>{summarize(g)}</small>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+
+                        {registrationView === "subgroups" && subgroupGroups.length > 0 && (
+                          <div className="group-box">
+                            <h4>Section/Lab (required, one only)</h4>
+                            {subgroupGroups.map((g) => (
+                              <label key={g.id} className="group-item">
+                                <input
+                                  type="radio"
+                                  name="sub"
+                                  value={g.id}
+                                  checked={Number(subPick) === g.id}
+                                  onChange={(ev) => setSubPick(Number(ev.target.value))}
+                                />
+                                <span>
+                                  <strong>{g.name}</strong> ({g.type})
+                                </span>
+                                <small>{summarize(g)}</small>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+
+                        <button className="btn" type="submit">
+                          Register Selection
+                        </button>
+                      </form>
+                    )}
                   </div>
                 );
               })}
             </div>
-          </section>
-
-          <section className={`panel registration-panel ${controlTab === "registration" ? "show" : "hide-mobile"}`}>
-            <h2>Registration</h2>
-            {!selectedCourse && <p className="muted">Select a course.</p>}
-            {selectedCourse && (
-              <form onSubmit={registerSelection} className="reg-form">
-                <h3>{selectedCourse.name}</h3>
-
-                <div className="group-box">
-                  <h4>Lecture Group (one required)</h4>
-                  {lectureGroups.map((g) => (
-                    <label key={g.id} className="group-item">
-                      <input
-                        type="radio"
-                        name="lecture"
-                        value={g.id}
-                        checked={Number(lecturePick) === g.id}
-                        onChange={(ev) => setLecturePick(Number(ev.target.value))}
-                      />
-                      <span>
-                        <strong>{g.name}</strong> ({g.type})
-                      </span>
-                      <small>{summarize(g)}</small>
-                    </label>
-                  ))}
-                </div>
-
-                <div className="group-box">
-                  <h4>{subgroupGroups.length ? "Section/Lab (required, one only)" : "Section/Lab (none for this course)"}</h4>
-                  {!subgroupGroups.length && <small className="muted">No section groups for this course.</small>}
-                  {!subgroupGroups.length && (
-                    <label className="group-item">
-                      <input
-                        type="radio"
-                        name="sub"
-                        value=""
-                        checked={subPick === ""}
-                        onChange={() => setSubPick("")}
-                      />
-                      <span>No section</span>
-                    </label>
-                  )}
-                  {subgroupGroups.map((g) => (
-                    <label key={g.id} className="group-item">
-                      <input
-                        type="radio"
-                        name="sub"
-                        value={g.id}
-                        checked={Number(subPick) === g.id}
-                        onChange={(ev) => setSubPick(Number(ev.target.value))}
-                      />
-                      <span>
-                        <strong>{g.name}</strong> ({g.type})
-                      </span>
-                      <small>{summarize(g)}</small>
-                    </label>
-                  ))}
-                </div>
-
-                <button className="btn" type="submit">
-                  Register Selection
-                </button>
-              </form>
-            )}
           </section>
         </aside>
 
@@ -608,18 +781,15 @@ function AppBody() {
               <button className="btn secondary" type="button" onClick={toggleFullscreen}>
                 Full Screen
               </button>
+              <button className="btn secondary" type="button" onClick={downloadSchedulePdf}>
+                Download PDF
+              </button>
               <button className="btn secondary" type="button" onClick={clearAll}>
                 Clear All
               </button>
             </div>
           </div>
-          {globalTrack && (
-            <div className="track-banner">
-              Active Track: {globalTrack.selectedSubgroup} =&gt; lectures {globalTrack.prefix} + section{" "}
-              {globalTrack.selectedSubgroup} across all courses
-            </div>
-          )}
-
+          <h1 className="print-export-title">{printTitle}</h1>
           <div className="timetable">
             <div className="time-header">
               <div className="corner">Day / Time</div>
