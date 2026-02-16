@@ -93,9 +93,8 @@ function to12h(hhmm) {
   const [hRaw, m] = hhmm.split(":");
   const h = Number(hRaw);
   if (Number.isNaN(h)) return hhmm;
-  const suffix = h >= 12 ? "PM" : "AM";
   const normalized = h % 12 === 0 ? 12 : h % 12;
-  return `${normalized}:${m} ${suffix}`;
+  return `${normalized}:${m}`;
 }
 
 export function formatSlotLabel(slot, format = "24h") {

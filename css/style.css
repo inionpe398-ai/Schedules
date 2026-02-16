@@ -13,6 +13,14 @@
 
 * {
   box-sizing: border-box;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  caret-color: transparent !important;
 }
 
 body {
@@ -207,19 +215,17 @@ body {
   min-height: 150px;
   overflow: hidden;
   background-color: #ffffff;
-  background-image: repeating-linear-gradient(
-    to right,
-    transparent 0,
-    transparent calc(var(--time-col-width) - 1px),
-    var(--border) calc(var(--time-col-width) - 1px),
-    var(--border) var(--time-col-width)
-  );
 }
 
 .slot-cell {
   grid-row: 1;
   min-height: 150px;
   background: transparent;
+  border-right: 1px solid var(--border);
+}
+
+.slot-cell:last-child {
+  border-right: 0;
 }
 
 .slot-block {

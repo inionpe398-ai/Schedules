@@ -40,6 +40,14 @@
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  caret-color: transparent !important;
 }
 
 html,
@@ -297,6 +305,19 @@ textarea {
   margin-top: 10px;
   border-top: 1px solid #f1b14b;
   padding-top: 10px;
+  transform-origin: top;
+  animation: expand-materials 240ms ease-out;
+}
+
+@keyframes expand-materials {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scaleY(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scaleY(1);
+  }
 }
 
 .registration-switcher {
@@ -619,6 +640,100 @@ textarea {
   gap: 12px;
   color: var(--muted);
   font-size: 0.8rem;
+}
+
+.insights-panel {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: #f8fafc;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.insights-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.free-time-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.free-day {
+  border: 1px solid #dbe3ef;
+  border-radius: var(--radius-sm);
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.free-day strong {
+  color: #1e3a8a;
+  font-size: 0.86rem;
+}
+
+.free-day p {
+  margin: 4px 0 0;
+  color: #334155;
+  font-size: 0.8rem;
+}
+
+.score-panel {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.score-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.score-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.score-line {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.ranked-tracks {
+  display: grid;
+  gap: 7px;
+}
+
+.rank-item {
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #fff;
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: grid;
+  gap: 3px;
+}
+
+.rank-item span {
+  font-weight: 700;
+  color: #0b5aa7;
+}
+
+.rank-item small {
+  color: #475569;
+  font-size: 0.76rem;
+}
+
+.rank-item.active {
+  border-color: #6366f1;
+  background: #eef2ff;
 }
 
 .dot {

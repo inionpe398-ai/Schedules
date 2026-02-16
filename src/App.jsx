@@ -123,6 +123,20 @@ function findConflict(candidate, existing) {
   return null;
 }
 
+function timeToMinutes(hhmm) {
+  const [h, m] = String(hhmm || "")
+    .split(":")
+    .map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+function slotStartMinutes(slotLabel) {
+  const parts = String(slotLabel || "").split("-");
+  if (!parts.length) return null;
+  return timeToMinutes(parts[0].trim());
+}
+
 function AppBody() {
   const [courses, setCourses] = useState([]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -134,6 +148,8 @@ function AppBody() {
   const [globalTrackPick, setGlobalTrackPick] = useState("");
   const [globalTrack, setGlobalTrack] = useState(null);
   const [registrationView, setRegistrationView] = useState("lectures");
+  const [showFreeTime, setShowFreeTime] = useState(false);
+  const [rankingCriterion, setRankingCriterion] = useState("balanced");
   const [timeFormat, setTimeFormat] = useState(() => {
     const saved = localStorage.getItem(TIME_FORMAT_KEY);
     return saved === "12h" ? "12h" : "24h";
@@ -146,9 +162,6 @@ function AppBody() {
     loadCourses()
       .then((loaded) => {
         setCourses(loaded);
-        if (loaded.length) {
-          setSelectedCourseId(loaded[0].id);
-        }
 
         let parsed = [];
         try {
@@ -276,6 +289,8 @@ function AppBody() {
   const registeredCount = registrations.length;
   const activePreviewCount =
     Object.values(preview).filter((p) => p?.lectures || p?.subgroups).length + (globalTrack ? 1 : 0);
+  const hasAllPreviewMode = Object.values(preview).some((p) => p?.lectures || p?.subgroups);
+  const scoreEnabled = !hasAllPreviewMode && (registrations.length > 0 || Boolean(globalTrack));
 
   const globalSubgroupOptions = useMemo(() => {
     const names = new Set();
@@ -299,6 +314,142 @@ function AppBody() {
     }
     return "Weekly Schedule";
   }, [globalTrack, selectedCourse]);
+
+  const slotStartByIndex = useMemo(() => TIME_SLOTS.map((slot) => slotStartMinutes(slot)), []);
+
+  const freeTimeByDay = useMemo(() => {
+    const occupied = new Map(DAYS.map((d) => [d, new Set()]));
+    for (const s of tableSessions) {
+      const day = normalizeDay(s);
+      const range = slotRange(s);
+      if (!occupied.has(day) || !range) continue;
+      for (let i = range.start; i < range.end; i += 1) occupied.get(day).add(i);
+    }
+
+    const result = new Map();
+    for (const day of DAYS) {
+      const used = occupied.get(day) || new Set();
+      const blocks = [];
+      let start = null;
+      for (let i = 0; i < TIME_SLOTS.length; i += 1) {
+        const busy = used.has(i);
+        if (!busy && start == null) start = i;
+        if ((busy || i === TIME_SLOTS.length - 1) && start != null) {
+          const endIndex = busy ? i - 1 : i;
+          const startText = TIME_SLOTS[start].split("-")[0].trim();
+          const endText = TIME_SLOTS[endIndex].split("-")[1].trim();
+          blocks.push(`${startText} - ${endText}`);
+          start = null;
+        }
+      }
+      result.set(day, blocks);
+    }
+    return result;
+  }, [tableSessions]);
+
+  function evaluateSchedule(sessions) {
+    const occupied = new Map(DAYS.map((d) => [d, new Set()]));
+    for (const s of sessions) {
+      const day = normalizeDay(s);
+      const range = slotRange(s);
+      if (!occupied.has(day) || !range) continue;
+      for (let i = range.start; i < range.end; i += 1) occupied.get(day).add(i);
+    }
+
+    let activeDays = 0;
+    let gapSlots = 0;
+    let after4Slots = 0;
+
+    for (const day of DAYS) {
+      const used = Array.from(occupied.get(day) || []).sort((a, b) => a - b);
+      if (!used.length) continue;
+      activeDays += 1;
+      const first = used[0];
+      const last = used[used.length - 1];
+      for (let i = first; i <= last; i += 1) {
+        if (!occupied.get(day).has(i)) gapSlots += 1;
+      }
+      for (const idx of used) {
+        const startMin = slotStartByIndex[idx];
+        if ((startMin ?? -1) >= 16 * 60) after4Slots += 1;
+      }
+    }
+
+    const scoreDays = Math.max(0, 100 - Math.max(0, activeDays - 1) * 18);
+    const scoreGaps = Math.max(0, 100 - gapSlots * 10);
+    const scoreLate = Math.max(0, 100 - after4Slots * 16);
+    const overall = Math.round(scoreDays * 0.4 + scoreGaps * 0.35 + scoreLate * 0.25);
+
+    return {
+      activeDays,
+      gapSlots,
+      after4Slots,
+      scoreDays,
+      scoreGaps,
+      scoreLate,
+      overall,
+    };
+  }
+
+  const currentScheduleScore = useMemo(() => evaluateSchedule(tableSessions), [tableSessions]);
+
+  const allTrackCandidates = useMemo(() => {
+    if (!scoreEnabled) return [];
+    const candidates = [];
+
+    for (const name of globalSubgroupOptions) {
+      const prefix = extractSectionPrefix(name);
+      if (!prefix) continue;
+      const sectionUpper = name.toUpperCase();
+      const prefixUpper = prefix.toUpperCase();
+      const trackSessions = [];
+
+      for (const course of courses) {
+        for (const session of course.sessions) {
+          const gName = String(session.GroupName || "").trim().toUpperCase();
+          if (isLecture(session.Type) && gName === prefixUpper) {
+            trackSessions.push({ ...session, courseId: course.id, courseName: course.name, source: "track" });
+          }
+          if (isSubgroup(session.Type) && gName === sectionUpper) {
+            trackSessions.push({ ...session, courseId: course.id, courseName: course.name, source: "track" });
+          }
+        }
+      }
+
+      const merged = [];
+      const seen = new Set();
+      for (const s of [...registeredSessions, ...trackSessions]) {
+        const key = `${s.courseId || s.courseName}|${s.GroupId}|${s.DayWeek}|${s.Time}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(s);
+      }
+
+      candidates.push({
+        name,
+        prefix,
+        score: evaluateSchedule(merged),
+      });
+    }
+
+    return candidates;
+  }, [scoreEnabled, globalSubgroupOptions, courses, registeredSessions]);
+
+  const rankedTrackCandidates = useMemo(() => {
+    const sorted = [...allTrackCandidates];
+    sorted.sort((a, b) => {
+      if (rankingCriterion === "days") return a.score.activeDays - b.score.activeDays || b.score.overall - a.score.overall;
+      if (rankingCriterion === "gaps") return a.score.gapSlots - b.score.gapSlots || b.score.overall - a.score.overall;
+      if (rankingCriterion === "late") return a.score.after4Slots - b.score.after4Slots || b.score.overall - a.score.overall;
+      return b.score.overall - a.score.overall;
+    });
+    return sorted;
+  }, [allTrackCandidates, rankingCriterion]);
+
+  const selectedTrackStats = useMemo(
+    () => rankedTrackCandidates.find((c) => c.name === globalTrackPick) || null,
+    [rankedTrackCandidates, globalTrackPick]
+  );
 
   function showNotice(type, title, message) {
     setNotice({ type, title, message });
@@ -399,10 +550,10 @@ function AppBody() {
     });
   }
 
-  function applyGlobalSectionTrack() {
-    const selectedName = String(globalTrackPick || "").trim();
+  function applyGlobalSectionTrack(selectedValue) {
+    const selectedName = String((selectedValue ?? globalTrackPick) || "").trim();
     if (!selectedName) {
-      showNotice("error", "Section Track", "Choose a section first (e.g. B1).");
+      setGlobalTrack(null);
       return;
     }
 
@@ -420,8 +571,9 @@ function AppBody() {
     setPreview({});
   }
 
-  function clearGlobalSectionTrack() {
-    setGlobalTrack(null);
+  function applyRankedTrack(name) {
+    setGlobalTrackPick(name);
+    applyGlobalSectionTrack(name);
   }
 
   async function toggleFullscreen() {
@@ -745,7 +897,11 @@ function AppBody() {
               <div className="global-track">
                 <select
                   value={globalTrackPick}
-                  onChange={(e) => setGlobalTrackPick(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setGlobalTrackPick(value);
+                    applyGlobalSectionTrack(value);
+                  }}
                   className="track-select"
                 >
                   <option value="">Section Track (e.g. B1)</option>
@@ -755,12 +911,6 @@ function AppBody() {
                     </option>
                   ))}
                 </select>
-                <button className="mini" type="button" onClick={applyGlobalSectionTrack}>
-                  Show Track
-                </button>
-                <button className="mini" type="button" onClick={clearGlobalSectionTrack}>
-                  Clear Track
-                </button>
               </div>
               <div className="time-format-toggle" role="group" aria-label="Time format">
                 <button
@@ -842,6 +992,86 @@ function AppBody() {
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="insights-panel">
+            <div className="insights-actions">
+              <button className="mini" type="button" onClick={() => setShowFreeTime((v) => !v)}>
+                {showFreeTime ? "Hide Free Time" : "Show Free Time"}
+              </button>
+            </div>
+
+            {showFreeTime && (
+              <div className="free-time-grid">
+                {DAYS.map((day) => {
+                  const blocks = freeTimeByDay.get(day) || [];
+                  return (
+                    <div key={`free-${day}`} className="free-day">
+                      <strong>{day}</strong>
+                      <p>{blocks.length ? blocks.join(" | ") : "No free slots"}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {scoreEnabled && (
+              <div className="score-panel">
+                <div className="score-header">
+                  <h3>Schedule Score: {currentScheduleScore.overall}/100</h3>
+                  <select
+                    className="track-select"
+                    value={rankingCriterion}
+                    onChange={(e) => setRankingCriterion(e.target.value)}
+                  >
+                    <option value="balanced">Best Overall</option>
+                    <option value="days">Fewest Days</option>
+                    <option value="gaps">Fewest Gaps</option>
+                    <option value="late">No Sessions After 4 PM</option>
+                  </select>
+                </div>
+                <p className="muted score-line">
+                  Days: {currentScheduleScore.activeDays} | Gaps: {currentScheduleScore.gapSlots} | After 4 PM:{" "}
+                  {currentScheduleScore.after4Slots}
+                </p>
+                {!globalTrackPick && (
+                  <div className="ranked-tracks">
+                    {rankedTrackCandidates.slice(0, 6).map((c) => (
+                      <button
+                        key={`rank-${c.name}`}
+                        type="button"
+                        className={`rank-item ${globalTrackPick === c.name ? "active" : ""}`}
+                        onClick={() => applyRankedTrack(c.name)}
+                      >
+                        <span>{c.name}</span>
+                        <small>
+                          Score {c.score.overall} | Days {c.score.activeDays} | Gaps {c.score.gapSlots} | After 4:{" "}
+                          {c.score.after4Slots}
+                        </small>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {globalTrackPick && selectedTrackStats && (
+                  <div className="ranked-tracks">
+                    <div className="rank-item active">
+                      <span>{selectedTrackStats.name}</span>
+                      <small>
+                        Score {selectedTrackStats.score.overall} | Days {selectedTrackStats.score.activeDays} | Gaps{" "}
+                        {selectedTrackStats.score.gapSlots} | After 4: {selectedTrackStats.score.after4Slots}
+                      </small>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {!scoreEnabled && (
+              <p className="muted score-line">
+                Schedule ranking is available for Registration and Section Track only (not All Lectures/All Sections
+                preview).
+              </p>
+            )}
           </div>
 
           <div className="legend">
