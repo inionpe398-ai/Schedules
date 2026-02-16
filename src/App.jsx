@@ -15,6 +15,9 @@ import {
 
 const STORAGE_KEY = "scheduleManagerSelectionsV2";
 const TIME_FORMAT_KEY = "scheduleTimeFormatV1";
+const PRESET_C1_MODIFIED_ID = "preset-c1-modified";
+const FORCED_STAFF_NAME = "Islam Bendary";
+const FORCED_STAFF_GROUPS = new Set(["C1", "C2", "B5", "B6", "B1", "B2", "A5", "A6", "C3", "C4", "B7", "B8"]);
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -77,6 +80,111 @@ function extractSectionPrefix(groupName) {
   const value = String(groupName || "").trim();
   const match = value.match(/^([A-Za-z]+)/);
   return match ? match[1].toUpperCase() : "";
+}
+
+function parseSectionGroupName(groupName) {
+  const value = String(groupName || "").trim();
+  const match = value.match(/^([A-Za-z]+)\s*(\d+)$/);
+  if (!match) return null;
+  return {
+    raw: value,
+    upper: value.toUpperCase(),
+    prefix: match[1].toUpperCase(),
+    number: Number(match[2]),
+  };
+}
+
+function pairedSectionGroupNames(groupName) {
+  const parsed = parseSectionGroupName(groupName);
+  if (!parsed) {
+    const single = String(groupName || "").trim().toUpperCase();
+    return single ? [single] : [];
+  }
+  const pairStart = parsed.number % 2 === 0 ? parsed.number - 1 : parsed.number;
+  return [`${parsed.prefix}${pairStart}`, `${parsed.prefix}${pairStart + 1}`];
+}
+
+function pairedSectionLabel(groupName) {
+  const pair = pairedSectionGroupNames(groupName);
+  if (!pair.length) return String(groupName || "").trim();
+  return pair.join("/");
+}
+
+function buildAutoModifiedLabel(baseLabel, existingLabels) {
+  const root = `${String(baseLabel || "").trim()} Modified`.trim();
+  if (!existingLabels.has(root)) return root;
+  let index = 2;
+  while (existingLabels.has(`${root} ${index}`)) index += 1;
+  return `${root} ${index}`;
+}
+
+function buildMergedTrackOptions(subgroupNames) {
+  const parsed = subgroupNames
+    .map(parseSectionGroupName)
+    .filter(Boolean);
+  const byPrefix = new Map();
+  const unmatched = [];
+
+  for (const item of parsed) {
+    if (!byPrefix.has(item.prefix)) byPrefix.set(item.prefix, new Map());
+    byPrefix.get(item.prefix).set(item.number, item.raw);
+  }
+
+  for (const name of subgroupNames) {
+    if (!parseSectionGroupName(name)) unmatched.push(name);
+  }
+
+  const options = [];
+  for (const [prefix, byNumber] of byPrefix.entries()) {
+    const numbers = Array.from(byNumber.keys()).sort((a, b) => a - b);
+    const seenStarts = new Set();
+    for (const n of numbers) {
+      const pairStart = n % 2 === 0 ? n - 1 : n;
+      if (seenStarts.has(pairStart)) continue;
+      seenStarts.add(pairStart);
+
+      const first = byNumber.get(pairStart);
+      const second = byNumber.get(pairStart + 1);
+      const sections = [first, second].filter(Boolean);
+      if (!sections.length) continue;
+
+      const label = sections.length === 2 ? `${prefix}${pairStart}/${prefix}${pairStart + 1}` : sections[0];
+      options.push({
+        id: `regular-${label}`,
+        label,
+        prefix,
+        sections,
+        isModified: false,
+        mode: "regular",
+      });
+    }
+  }
+
+  for (const name of unmatched.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))) {
+    const prefix = extractSectionPrefix(name);
+    if (!prefix) continue;
+    options.push({
+      id: `regular-${name}`,
+      label: name,
+      prefix,
+      sections: [name],
+      isModified: false,
+      mode: "regular",
+    });
+  }
+
+  options.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
+  return options;
+}
+
+function toSecondsHHMM(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.length === 5 ? `${raw}:00` : raw;
+}
+
+function sessionKeyForTrack(courseId, session) {
+  return `${courseId}|${session.GroupId}|${session.DayWeek}|${session.IntervalId || ""}|${session.NameEn || ""}`;
 }
 
 function normalizeRegistrations(courses, raw) {
@@ -161,6 +269,15 @@ function AppBody() {
   const [recommendSearch, setRecommendSearch] = useState("");
   const [recommendTypeFilter, setRecommendTypeFilter] = useState("all");
   const [recommendDayFilter, setRecommendDayFilter] = useState("all");
+  const [customTrackOptions, setCustomTrackOptions] = useState([]);
+  const [trackOverrides, setTrackOverrides] = useState({});
+  const [removedModifiedTrackIds, setRemovedModifiedTrackIds] = useState([]);
+  const [showModifyPanel, setShowModifyPanel] = useState(false);
+  const [modifyMode, setModifyMode] = useState("regular");
+  const [modifyTrackId, setModifyTrackId] = useState("");
+  const [modifySessionKey, setModifySessionKey] = useState("");
+  const [modifyStaff, setModifyStaff] = useState("");
+  const [modifyStartIndex, setModifyStartIndex] = useState("");
   const [timeFormat, setTimeFormat] = useState(() => {
     const saved = localStorage.getItem(TIME_FORMAT_KEY);
     return saved === "12h" ? "12h" : "24h";
@@ -251,60 +368,23 @@ function AppBody() {
       if (!flags) continue;
       for (const session of course.sessions) {
         if (flags.lectures && isLecture(session.Type)) {
-          out.push({ ...session, courseName: course.name, source: "preview" });
+          out.push({ ...session, courseId: course.id, courseName: course.name, source: "preview" });
         }
         if (flags.subgroups && isSubgroup(session.Type)) {
-          out.push({ ...session, courseName: course.name, source: "preview" });
+          out.push({ ...session, courseId: course.id, courseName: course.name, source: "preview" });
         }
       }
     }
     return out;
   }, [courses, preview]);
 
-  const globalTrackSessions = useMemo(() => {
-    if (!globalTrack?.section || !globalTrack?.prefix) return [];
+  const applyStaffPreset = (session) => {
+    const sectionName = String(session.GroupName || "").trim().toUpperCase();
+    if (!FORCED_STAFF_GROUPS.has(sectionName)) return session;
+    return { ...session, Staff: FORCED_STAFF_NAME };
+  };
 
-    const sectionUpper = globalTrack.section.toUpperCase();
-    const prefixUpper = globalTrack.prefix.toUpperCase();
-    const out = [];
-
-    for (const course of courses) {
-      for (const session of course.sessions) {
-        const gName = String(session.GroupName || "").trim().toUpperCase();
-        if (isLecture(session.Type) && gName === prefixUpper) {
-          out.push({ ...session, courseId: course.id, courseName: course.name, source: "track" });
-        }
-        if (isSubgroup(session.Type) && gName === sectionUpper) {
-          out.push({ ...session, courseId: course.id, courseName: course.name, source: "track" });
-        }
-      }
-    }
-
-    return out;
-  }, [globalTrack, courses]);
-
-  const tableSessions = useMemo(() => {
-    const all = [...registeredSessions, ...globalTrackSessions, ...previewSessions];
-    const seen = new Set();
-    const output = [];
-
-    for (const s of all) {
-      const key = `${s.courseId || s.courseName}|${s.GroupId}|${s.DayWeek}|${s.Time}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      output.push(s);
-    }
-
-    return output;
-  }, [registeredSessions, globalTrackSessions, previewSessions]);
-  const registeredCount = registrations.length;
-  const activePreviewCount =
-    Object.values(preview).filter((p) => p?.lectures || p?.subgroups).length + (globalTrack ? 1 : 0);
-  const hasAllPreviewMode = Object.values(preview).some((p) => p?.lectures || p?.subgroups);
-  const scoreEnabled = !hasAllPreviewMode && courses.length > 0;
-  const hasBuiltSchedule = tableSessions.length > 0 || Boolean(globalTrackPick);
-
-  const globalSubgroupOptions = useMemo(() => {
+  const subgroupNames = useMemo(() => {
     const names = new Set();
     for (const course of courses) {
       for (const session of course.sessions) {
@@ -314,8 +394,196 @@ function AppBody() {
         }
       }
     }
-    return Array.from(names).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    return Array.from(names);
   }, [courses]);
+
+  const baseTrackOptions = useMemo(() => buildMergedTrackOptions(subgroupNames), [subgroupNames]);
+
+  const presetC1ModifiedTrack = useMemo(() => {
+    const hasC1 = subgroupNames.some((name) => String(name).toUpperCase() === "C1");
+    if (!hasC1) return null;
+    return {
+      id: PRESET_C1_MODIFIED_ID,
+      label: "C1/C2 Modified",
+      prefix: "C",
+      sections: ["C1", "C2"],
+      isModified: true,
+      mode: "modified",
+      baseTrackId: "regular-C1/C2",
+    };
+  }, [subgroupNames]);
+
+  const trackOptions = useMemo(() => {
+    const out = [...baseTrackOptions];
+    if (presetC1ModifiedTrack) out.push(presetC1ModifiedTrack);
+    out.push(...customTrackOptions);
+    return out.filter((track) => !removedModifiedTrackIds.includes(track.id));
+  }, [baseTrackOptions, presetC1ModifiedTrack, customTrackOptions, removedModifiedTrackIds]);
+
+  const trackById = useMemo(() => new Map(trackOptions.map((track) => [track.id, track])), [trackOptions]);
+  const activeTrackOption = useMemo(() => trackById.get(globalTrackPick) || null, [trackById, globalTrackPick]);
+  const activeTrackOverrideMap = useMemo(
+    () => (activeTrackOption ? trackOverrides[activeTrackOption.id] || {} : {}),
+    [activeTrackOption, trackOverrides]
+  );
+  const globalOverridesMap = useMemo(() => {
+    const merged = {};
+    for (const map of Object.values(trackOverrides || {})) {
+      if (!map || typeof map !== "object") continue;
+      Object.assign(merged, map);
+    }
+    return merged;
+  }, [trackOverrides]);
+  const shouldSyncWithModified = useMemo(
+    () => Boolean(activeTrackOption && (activeTrackOption.isModified || Object.keys(activeTrackOverrideMap).length)),
+    [activeTrackOption, activeTrackOverrideMap]
+  );
+
+  function isPresetC1ModifiedTrack(track) {
+    if (!track) return false;
+    return track.id === PRESET_C1_MODIFIED_ID || track.baseTrackId === PRESET_C1_MODIFIED_ID;
+  }
+
+  function applyTrackSpecificAdjustments(rawSession, courseId, track, overrideMap = {}) {
+    let session = applyStaffPreset(rawSession);
+    let isModified = false;
+    let modifiedReason = "";
+
+    const groupUpper = String(session.GroupName || "").trim().toUpperCase();
+    const c1Pair = new Set(pairedSectionGroupNames("C1"));
+    if (
+      isPresetC1ModifiedTrack(track) &&
+      String(courseId || "").toLowerCase() === "operative" &&
+      c1Pair.has(groupUpper) &&
+      String(session.Time || "").includes("12:30")
+    ) {
+      session = { ...session, Time: "08:45:00 - 10:15:00" };
+      isModified = true;
+      modifiedReason = "Time changed for C1 Modified";
+    }
+
+    const key = sessionKeyForTrack(courseId, rawSession);
+    const override = overrideMap[key];
+    if (override) {
+      session = {
+        ...session,
+        Staff: override.Staff ?? session.Staff,
+        Time: override.Time ?? session.Time,
+      };
+      isModified = true;
+      modifiedReason = "Manual modify";
+    }
+
+    return { session, isModified, modifiedReason, key };
+  }
+
+  useEffect(() => {
+    if (!modifyTrackId && trackOptions.length > 0) {
+      setModifyTrackId(trackOptions[0].id);
+    }
+  }, [modifyTrackId, trackOptions]);
+
+  useEffect(() => {
+    if (globalTrackPick) {
+      setModifyTrackId(globalTrackPick);
+    }
+  }, [globalTrackPick]);
+
+  const globalTrackSessions = useMemo(() => {
+    if (!globalTrack?.trackId || !globalTrack?.prefix) return [];
+
+    const sectionSet = new Set((globalTrack.sections || []).map((s) => String(s).trim().toUpperCase()));
+    const prefixUpper = globalTrack.prefix.toUpperCase();
+    const trackId = globalTrack.trackId;
+    const trackOverrideMap = trackOverrides[trackId] || {};
+    const out = [];
+
+    for (const course of courses) {
+      for (const raw of course.sessions) {
+        const gName = String(raw.GroupName || "").trim().toUpperCase();
+        const matchesLecture = isLecture(raw.Type) && gName === prefixUpper;
+        const matchesSubgroup = isSubgroup(raw.Type) && sectionSet.has(gName);
+        if (!matchesLecture && !matchesSubgroup) continue;
+
+        const adjusted = applyTrackSpecificAdjustments(raw, course.id, trackById.get(trackId), trackOverrideMap);
+        const { session, isModified, modifiedReason, key } = adjusted;
+
+        out.push({
+          ...session,
+          courseId: course.id,
+          courseName: course.name,
+          source: "track",
+          isModified,
+          modifiedReason,
+          trackSessionKey: key,
+        });
+      }
+    }
+
+    return out;
+  }, [globalTrack, courses, trackOverrides, trackById]);
+
+  const tableSessions = useMemo(() => {
+    const all = [...registeredSessions, ...globalTrackSessions, ...previewSessions];
+    const seen = new Set();
+    const output = [];
+
+    for (const s of all) {
+      let normalized = applyStaffPreset(s);
+      let isModified = Boolean(s.isModified);
+      let modifiedReason = s.modifiedReason || "";
+
+      if (s.source !== "track") {
+        const globalKey = sessionKeyForTrack(normalized.courseId || "", normalized);
+        const globalOverride = globalOverridesMap[globalKey];
+        if (globalOverride) {
+          normalized = {
+            ...normalized,
+            Staff: globalOverride.Staff ?? normalized.Staff,
+            Time: globalOverride.Time ?? normalized.Time,
+          };
+          isModified = true;
+          modifiedReason = "Synced from modified track";
+        }
+      }
+
+      if (shouldSyncWithModified && s.source !== "track") {
+        const adjusted = applyTrackSpecificAdjustments(
+          normalized,
+          normalized.courseId || "",
+          activeTrackOption,
+          activeTrackOverrideMap
+        );
+        normalized = adjusted.session;
+        if (adjusted.isModified) {
+          isModified = true;
+          modifiedReason = adjusted.modifiedReason;
+        }
+      }
+
+      normalized = { ...normalized, isModified, modifiedReason };
+      const key = `${normalized.courseId || normalized.courseName}|${normalized.GroupId}|${normalized.DayWeek}|${normalized.Time}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      output.push(normalized);
+    }
+
+    return output;
+  }, [
+    registeredSessions,
+    globalTrackSessions,
+    previewSessions,
+    globalOverridesMap,
+    shouldSyncWithModified,
+    activeTrackOption,
+    activeTrackOverrideMap,
+  ]);
+  const registeredCount = registrations.length;
+  const activePreviewCount =
+    Object.values(preview).filter((p) => p?.lectures || p?.subgroups).length + (globalTrack ? 1 : 0);
+  const hasAllPreviewMode = Object.values(preview).some((p) => p?.lectures || p?.subgroups);
+  const scoreEnabled = !hasAllPreviewMode && courses.length > 0;
+  const hasBuiltSchedule = tableSessions.length > 0 || Boolean(globalTrackPick);
 
   const printTitle = useMemo(() => {
     if (globalTrack?.selectedSubgroup) {
@@ -326,6 +594,19 @@ function AppBody() {
     }
     return "Weekly Schedule";
   }, [globalTrack, selectedCourse]);
+
+  const currentTrackLabel = useMemo(() => {
+    if (globalTrack?.selectedSubgroup) return globalTrack.selectedSubgroup;
+    if (!globalTrackPick) return "";
+    return trackById.get(globalTrackPick)?.label || "";
+  }, [globalTrack, globalTrackPick, trackById]);
+
+  function displayGroupNameInCard(session) {
+    if (!isSubgroup(session?.Type)) return session?.GroupName;
+    if (session?.source === "preview") return pairedSectionLabel(session?.GroupName);
+    if (!globalTrackPick) return session?.GroupName;
+    return pairedSectionLabel(session?.GroupName);
+  }
 
   const slotStartByIndex = useMemo(() => TIME_SLOTS.map((slot) => slotStartMinutes(slot)), []);
 
@@ -506,11 +787,9 @@ function AppBody() {
     if (!scoreEnabled) return [];
     const candidates = [];
 
-    for (const name of globalSubgroupOptions) {
-      const prefix = extractSectionPrefix(name);
-      if (!prefix) continue;
-      const sectionUpper = name.toUpperCase();
-      const prefixUpper = prefix.toUpperCase();
+    for (const track of baseTrackOptions) {
+      const prefixUpper = track.prefix.toUpperCase();
+      const sectionSet = new Set(track.sections.map((s) => String(s).trim().toUpperCase()));
       const trackSessions = [];
 
       for (const course of courses) {
@@ -519,7 +798,7 @@ function AppBody() {
           if (isLecture(session.Type) && gName === prefixUpper) {
             trackSessions.push({ ...session, courseId: course.id, courseName: course.name, source: "track" });
           }
-          if (isSubgroup(session.Type) && gName === sectionUpper) {
+          if (isSubgroup(session.Type) && sectionSet.has(gName)) {
             trackSessions.push({ ...session, courseId: course.id, courseName: course.name, source: "track" });
           }
         }
@@ -535,14 +814,15 @@ function AppBody() {
       }
 
       candidates.push({
-        name,
-        prefix,
+        id: track.id,
+        name: track.label,
+        prefix: track.prefix,
         score: evaluateSchedule(merged),
       });
     }
 
     return candidates;
-  }, [scoreEnabled, globalSubgroupOptions, courses, registeredSessions]);
+  }, [scoreEnabled, baseTrackOptions, courses, registeredSessions]);
 
   const rankedTrackCandidates = useMemo(() => {
     const sorted = [...allTrackCandidates];
@@ -626,6 +906,10 @@ function AppBody() {
     setRegistrations([]);
     setPreview({});
     setGlobalTrack(null);
+    setGlobalTrackPick("");
+    setTrackOverrides({});
+    setCustomTrackOptions([]);
+    setRemovedModifiedTrackIds([]);
     localStorage.removeItem(STORAGE_KEY);
     showNotice("info", "Cleared", "All registrations and previews were cleared.");
   }
@@ -656,29 +940,266 @@ function AppBody() {
   }
 
   function applyGlobalSectionTrack(selectedValue) {
-    const selectedName = String((selectedValue ?? globalTrackPick) || "").trim();
-    if (!selectedName) {
+    const selectedId = String((selectedValue ?? globalTrackPick) || "").trim();
+    if (!selectedId) {
       setGlobalTrack(null);
       return;
     }
 
-    const prefix = extractSectionPrefix(selectedName);
-    if (!prefix) {
+    const selectedTrack = trackById.get(selectedId);
+    if (!selectedTrack?.prefix) {
       showNotice("error", "Section Track", "Could not detect section prefix from group name.");
       return;
     }
 
     setGlobalTrack({
-      section: selectedName,
-      prefix,
-      selectedSubgroup: selectedName,
+      trackId: selectedTrack.id,
+      section: selectedTrack.label,
+      prefix: selectedTrack.prefix,
+      sections: selectedTrack.sections,
+      selectedSubgroup: selectedTrack.label,
+      isModified: Boolean(selectedTrack.isModified),
     });
     setPreview({});
   }
 
   function applyRankedTrack(name) {
-    setGlobalTrackPick(name);
-    applyGlobalSectionTrack(name);
+    const selected = baseTrackOptions.find((track) => track.label === name);
+    if (!selected) return;
+    setGlobalTrackPick(selected.id);
+    applyGlobalSectionTrack(selected.id);
+  }
+
+  const modifyTargetTrack = trackById.get(modifyTrackId);
+  const modifyTrackOverrides = modifyTargetTrack ? trackOverrides[modifyTargetTrack.id] || {} : {};
+  const modifyTrackHasChanges = Boolean(
+    modifyTargetTrack && (modifyTargetTrack.isModified || Object.keys(modifyTrackOverrides).length)
+  );
+  const modifyTrackIsRemovable = Boolean(modifyTargetTrack?.isModified);
+
+  const editableTrackSessions = useMemo(() => {
+    if (!modifyTargetTrack) return [];
+    const prefixUpper = modifyTargetTrack.prefix.toUpperCase();
+    const sectionSet = new Set(modifyTargetTrack.sections.map((s) => String(s).trim().toUpperCase()));
+    const out = [];
+
+    for (const course of courses) {
+      for (const raw of course.sessions) {
+        const gName = String(raw.GroupName || "").trim().toUpperCase();
+        const matchesLecture = isLecture(raw.Type) && gName === prefixUpper;
+        const matchesSubgroup = isSubgroup(raw.Type) && sectionSet.has(gName);
+        if (!matchesLecture && !matchesSubgroup) continue;
+        out.push({
+          ...raw,
+          courseId: course.id,
+          courseName: course.name,
+          sessionKey: sessionKeyForTrack(course.id, raw),
+        });
+      }
+    }
+
+    out.sort((a, b) => {
+      const dayOrder = DAYS.indexOf(normalizeDay(a)) - DAYS.indexOf(normalizeDay(b));
+      if (dayOrder !== 0) return dayOrder;
+      return String(a.courseName || "").localeCompare(String(b.courseName || ""));
+    });
+    return out;
+  }, [modifyTargetTrack, courses]);
+
+  const editableSessionOptions = useMemo(() => {
+    const map = new Map();
+    for (const session of editableTrackSessions) {
+      const day = normalizeDay(session);
+      const time = session.Time;
+      const courseId = session.courseId;
+      const courseName = session.courseName;
+      const isSub = isSubgroup(session.Type);
+      const groupLabel = isSub ? pairedSectionLabel(session.GroupName) : String(session.GroupName || "").trim();
+      const key = isSub
+        ? `pair|${courseId}|${groupLabel}|${day}|${time}|${session.NameEn || ""}`
+        : `single|${session.sessionKey}`;
+
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          label: `${courseName} | ${groupLabel} | ${day} | ${formatSessionTimeLabel(time, timeFormat)}`,
+          targetKeys: [],
+          sample: session,
+          dayIndex: DAYS.indexOf(day),
+          courseName,
+        });
+      }
+      const option = map.get(key);
+      if (!option.targetKeys.includes(session.sessionKey)) {
+        option.targetKeys.push(session.sessionKey);
+      }
+    }
+
+    const out = Array.from(map.values());
+    out.sort((a, b) => {
+      const byDay = a.dayIndex - b.dayIndex;
+      if (byDay !== 0) return byDay;
+      return a.courseName.localeCompare(b.courseName);
+    });
+    return out;
+  }, [editableTrackSessions, timeFormat]);
+
+  const selectedEditableOption = useMemo(
+    () => editableSessionOptions.find((option) => option.key === modifySessionKey) || null,
+    [editableSessionOptions, modifySessionKey]
+  );
+  const selectedEditableSession = selectedEditableOption?.sample || null;
+
+  function applyTrackModification() {
+    if (!modifyTargetTrack) {
+      showNotice("error", "Modify", "Select a section track first.");
+      return;
+    }
+    if (!selectedEditableSession) {
+      showNotice("error", "Modify", "Select a session to modify.");
+      return;
+    }
+
+    let nextTime = "";
+    if (modifyStartIndex !== "") {
+      const start = Number(modifyStartIndex);
+      if (Number.isNaN(start) || start < 0 || start >= TIME_SLOTS.length) {
+        showNotice("error", "Modify", "Invalid start slot.");
+        return;
+      }
+
+      const span = forcedSpanByType(selectedEditableSession.Type);
+      const end = start + span - 1;
+      if (end >= TIME_SLOTS.length) {
+        showNotice("error", "Modify", "Selected slot does not fit this session duration.");
+        return;
+      }
+
+      const startText = toSecondsHHMM(TIME_SLOTS[start].split("-")[0].trim());
+      const endText = toSecondsHHMM(TIME_SLOTS[end].split("-")[1].trim());
+      nextTime = `${startText} - ${endText}`;
+    }
+
+    const payload = {};
+    if (modifyStaff.trim()) payload.Staff = modifyStaff.trim();
+    if (nextTime) payload.Time = nextTime;
+    if (!Object.keys(payload).length) {
+      showNotice("error", "Modify", "Enter a new staff name or choose a new start time.");
+      return;
+    }
+
+    const targetKeys = selectedEditableOption?.targetKeys || [];
+    if (!targetKeys.length) {
+      showNotice("error", "Modify", "Select a valid session option.");
+      return;
+    }
+
+    if (modifyMode === "new") {
+      const existingLabels = new Set(trackOptions.map((track) => track.label));
+      const label = buildAutoModifiedLabel(modifyTargetTrack.label, existingLabels);
+      const id = `custom-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
+
+      setCustomTrackOptions((prev) => [
+        ...prev,
+        {
+          id,
+          label,
+          prefix: modifyTargetTrack.prefix,
+          sections: [...modifyTargetTrack.sections],
+          isModified: true,
+          mode: "modified",
+          baseTrackId: modifyTargetTrack.id,
+        },
+      ]);
+
+      setTrackOverrides((prev) => ({
+        ...prev,
+        [id]: {
+          ...(prev[modifyTargetTrack.id] || {}),
+          ...Object.fromEntries(targetKeys.map((key) => [key, payload])),
+        },
+      }));
+
+      setGlobalTrackPick(id);
+      setGlobalTrack({
+        trackId: id,
+        section: label,
+        prefix: modifyTargetTrack.prefix,
+        sections: [...modifyTargetTrack.sections],
+        selectedSubgroup: label,
+        isModified: true,
+      });
+      showNotice("success", "Modify", `${label} created successfully.`);
+    } else {
+      setTrackOverrides((prev) => ({
+        ...prev,
+        [modifyTargetTrack.id]: {
+          ...(prev[modifyTargetTrack.id] || {}),
+          ...Object.fromEntries(
+            targetKeys.map((key) => [key, { ...(prev[modifyTargetTrack.id]?.[key] || {}), ...payload }])
+          ),
+        },
+      }));
+      if (globalTrackPick === modifyTargetTrack.id) {
+        applyGlobalSectionTrack(modifyTargetTrack.id);
+      }
+      showNotice("success", "Modify", `${modifyTargetTrack.label} updated successfully.`);
+    }
+
+    setModifySessionKey("");
+    setModifyStaff("");
+    setModifyStartIndex("");
+  }
+
+  function revertTrackChanges() {
+    if (!modifyTargetTrack) return;
+
+    setTrackOverrides((prev) => {
+      const next = { ...prev };
+      delete next[modifyTargetTrack.id];
+      return next;
+    });
+
+    if (modifyTargetTrack.id === PRESET_C1_MODIFIED_ID && modifyTargetTrack.baseTrackId) {
+      setGlobalTrackPick(modifyTargetTrack.baseTrackId);
+      applyGlobalSectionTrack(modifyTargetTrack.baseTrackId);
+    } else if (globalTrackPick === modifyTargetTrack.id) {
+      applyGlobalSectionTrack(modifyTargetTrack.id);
+    }
+
+    showNotice("info", "Reverted", `${modifyTargetTrack.label} changes were reverted.`);
+  }
+
+  function removeModifiedTrack() {
+    if (!modifyTargetTrack?.isModified) return;
+
+    const fallbackTrackId = modifyTargetTrack.baseTrackId || "";
+    setTrackOverrides((prev) => {
+      const next = { ...prev };
+      delete next[modifyTargetTrack.id];
+      return next;
+    });
+
+    if (modifyTargetTrack.id.startsWith("custom-")) {
+      setCustomTrackOptions((prev) => prev.filter((track) => track.id !== modifyTargetTrack.id));
+    }
+    setRemovedModifiedTrackIds((prev) =>
+      prev.includes(modifyTargetTrack.id) ? prev : [...prev, modifyTargetTrack.id]
+    );
+
+    if (globalTrackPick === modifyTargetTrack.id) {
+      setGlobalTrackPick(fallbackTrackId);
+      applyGlobalSectionTrack(fallbackTrackId);
+      if (!fallbackTrackId) {
+        setGlobalTrack(null);
+      }
+    }
+
+    if (modifyTrackId === modifyTargetTrack.id) {
+      setModifyTrackId(fallbackTrackId);
+    }
+
+    showNotice("info", "Removed", `${modifyTargetTrack.label} was removed.`);
   }
 
   async function toggleFullscreen() {
@@ -970,10 +1491,10 @@ function AppBody() {
                   }}
                   className="track-select"
                 >
-                  <option value="">Section Track (e.g. B1)</option>
-                  {globalSubgroupOptions.map((name) => (
-                    <option key={name} value={name}>
-                      {name}
+                  <option value="">Section Track (Merged + Modified)</option>
+                  {trackOptions.map((track) => (
+                    <option key={track.id} value={track.id}>
+                      {track.label}
                     </option>
                   ))}
                 </select>
@@ -994,6 +1515,21 @@ function AppBody() {
                   12h
                 </button>
               </div>
+              <button
+                className={`btn secondary ${showModifyPanel ? "on" : ""}`}
+                type="button"
+                onClick={() =>
+                  setShowModifyPanel((v) => {
+                    const next = !v;
+                    if (next && globalTrackPick) {
+                      setModifyTrackId(globalTrackPick);
+                    }
+                    return next;
+                  })
+                }
+              >
+                Modify
+              </button>
               <button className="btn secondary" type="button" onClick={toggleFullscreen}>
                 Full Screen
               </button>
@@ -1005,6 +1541,112 @@ function AppBody() {
               </button>
             </div>
           </div>
+          {showModifyPanel && (
+            <div className="modify-panel">
+              <div className="modify-row">
+                <label htmlFor="modify-track">Track</label>
+                <select
+                  id="modify-track"
+                  className="track-select"
+                  value={modifyTrackId}
+                  onChange={(e) => {
+                    setModifyTrackId(e.target.value);
+                    setModifySessionKey("");
+                  }}
+                >
+                  <option value="">Select Track</option>
+                  {trackOptions.map((track) => (
+                    <option key={`modify-track-${track.id}`} value={track.id}>
+                      {track.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="modify-row mode">
+                <button
+                  type="button"
+                  className={`mini ${modifyMode === "regular" ? "on" : ""}`}
+                  onClick={() => setModifyMode("regular")}
+                >
+                  Modify Same Track
+                </button>
+                <button
+                  type="button"
+                  className={`mini ${modifyMode === "new" ? "on" : ""}`}
+                  onClick={() => setModifyMode("new")}
+                >
+                  Create Modified Copy
+                </button>
+              </div>
+
+              <div className="modify-row">
+                <label htmlFor="modify-session">Session</label>
+                <select
+                  id="modify-session"
+                  className="track-select"
+                  value={modifySessionKey}
+                  onChange={(e) => setModifySessionKey(e.target.value)}
+                >
+                  <option value="">Select Session</option>
+                  {editableSessionOptions.map((option) => (
+                    <option key={`editable-${option.key}`} value={option.key}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="modify-grid">
+                <div className="modify-row">
+                  <label htmlFor="modify-staff">Staff Name</label>
+                  <input
+                    id="modify-staff"
+                    type="text"
+                    value={modifyStaff}
+                    onChange={(e) => setModifyStaff(e.target.value)}
+                    placeholder={selectedEditableSession?.Staff || "New staff name"}
+                  />
+                </div>
+                <div className="modify-row">
+                  <label htmlFor="modify-time">New Start Slot</label>
+                  <select
+                    id="modify-time"
+                    className="track-select"
+                    value={modifyStartIndex}
+                    onChange={(e) => setModifyStartIndex(e.target.value)}
+                  >
+                    <option value="">Keep current</option>
+                    {TIME_SLOTS.map((slot, idx) => {
+                      const span = forcedSpanByType(selectedEditableSession?.Type || "Group");
+                      if (idx + span > TIME_SLOTS.length) return null;
+                      return (
+                        <option key={`modify-slot-${slot}`} value={idx}>
+                          {formatSlotLabel(slot, timeFormat)}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+
+              <div className="modify-row actions">
+                <button type="button" className="btn" onClick={applyTrackModification}>
+                  Apply Modify
+                </button>
+                {modifyTrackHasChanges && (
+                  <button type="button" className="btn secondary" onClick={revertTrackChanges}>
+                    Revert Changes
+                  </button>
+                )}
+                {modifyTrackIsRemovable && (
+                  <button type="button" className="mini danger" onClick={removeModifiedTrack}>
+                    Remove Modified
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           <h1 className="print-export-title">{printTitle}</h1>
           <div className="timetable">
             <div className="time-header">
@@ -1034,16 +1676,21 @@ function AppBody() {
                           key={`${day}-${s.courseName}-${s.GroupId}-${idx}-${s.Time}`}
                           className={`lesson ${blockKindByType(s.Type)} ${s.source === "preview" ? "preview" : ""} ${
                             s.source === "track" ? "track" : ""
+                          } ${s.isModified ? "modified" : ""} ${
+                            globalTrack?.isModified && s.source === "track" ? "modified-track" : ""
                           }`}
                           style={{ gridColumn: `${range.start + 1} / span ${forcedSpanByType(s.Type)}` }}
-                          title={`${s.courseName} | ${s.GroupName} | ${s.Time}`}
+                          title={`${s.courseName} | ${displayGroupNameInCard(s)} | ${s.Time}${
+                            s.isModified ? ` | ${s.modifiedReason || "Modified"}` : ""
+                          }`}
                         >
                           <div className="lesson-content">
+                            {s.isModified && <div className="modified-tag">Modified</div>}
                             <div>
                               <strong>Course:</strong> {s.courseName}
                             </div>
                             <div>
-                              <strong>{groupLabelByType(s.Type)}:</strong> {s.GroupName}
+                              <strong>{groupLabelByType(s.Type)}:</strong> {displayGroupNameInCard(s)}
                             </div>
                             <div>
                               <strong>Hall:</strong> {s.ClassRoomName || "N/A"}
@@ -1098,7 +1745,7 @@ function AppBody() {
                 {scoreEnabled && hasBuiltSchedule && (
                   <div className="score-panel highlight">
                     <div className="score-header">
-                      <h3>{globalTrackPick ? `${globalTrackPick} Analytics` : "Current Schedule Analytics"}</h3>
+                      <h3>{currentTrackLabel ? `${currentTrackLabel} Analytics` : "Current Schedule Analytics"}</h3>
                     </div>
                     <div className="metric-badges">
                       <span className="metric-badge overall">Score {currentScheduleScore.overall}/100</span>
@@ -1127,9 +1774,9 @@ function AppBody() {
                     <div className="ranked-tracks">
                       {rankedTrackCandidates.slice(0, 10).map((c) => (
                         <button
-                          key={`rank-${c.name}`}
+                          key={`rank-${c.id}`}
                           type="button"
-                          className={`rank-item ${globalTrackPick === c.name ? "active" : ""}`}
+                          className={`rank-item ${globalTrackPick === c.id ? "active" : ""}`}
                           onClick={() => applyRankedTrack(c.name)}
                         >
                           <span>{c.name}</span>
@@ -1153,7 +1800,7 @@ function AppBody() {
                   <div className="recommendations-panel">
                     <h3>
                       Recommendations
-                      {globalTrackPick ? ` for ${globalTrackPick}` : ""}
+                      {currentTrackLabel ? ` for ${currentTrackLabel}` : ""}
                     </h3>
                     <div className="recommendation-filters">
                       <input
@@ -1256,4 +1903,3 @@ export default function App() {
     </ErrorBoundary>
   );
 }
-
