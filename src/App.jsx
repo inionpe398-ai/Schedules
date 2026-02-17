@@ -18,6 +18,15 @@ const TIME_FORMAT_KEY = "scheduleTimeFormatV1";
 const PRESET_C1_MODIFIED_ID = "preset-c1-modified";
 const FORCED_STAFF_NAME = "Islam Bendary";
 const FORCED_STAFF_GROUPS = new Set(["C1", "C2", "B5", "B6", "B1", "B2", "A5", "A6", "C3", "C4", "B7", "B8"]);
+const DAY_WEEK_BY_NAME = {
+  Sunday: 1,
+  Monday: 2,
+  Tuesday: 3,
+  Wednesday: 4,
+  Thursday: 5,
+  Friday: 6,
+  Saturday: 7,
+};
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -278,6 +287,7 @@ function AppBody() {
   const [modifySessionKey, setModifySessionKey] = useState("");
   const [modifyStaff, setModifyStaff] = useState("");
   const [modifyStartIndex, setModifyStartIndex] = useState("");
+  const [modifyDay, setModifyDay] = useState("");
   const [timeFormat, setTimeFormat] = useState(() => {
     const saved = localStorage.getItem(TIME_FORMAT_KEY);
     return saved === "12h" ? "12h" : "24h";
@@ -469,6 +479,8 @@ function AppBody() {
         ...session,
         Staff: override.Staff ?? session.Staff,
         Time: override.Time ?? session.Time,
+        DayWeekName: override.DayWeekName ?? session.DayWeekName,
+        DayWeek: override.DayWeek ?? session.DayWeek,
       };
       isModified = true;
       modifiedReason = "Manual modify";
@@ -1083,8 +1095,12 @@ function AppBody() {
     const payload = {};
     if (modifyStaff.trim()) payload.Staff = modifyStaff.trim();
     if (nextTime) payload.Time = nextTime;
+    if (modifyDay) {
+      payload.DayWeekName = modifyDay;
+      payload.DayWeek = DAY_WEEK_BY_NAME[modifyDay] ?? selectedEditableSession.DayWeek;
+    }
     if (!Object.keys(payload).length) {
-      showNotice("error", "Modify", "Enter a new staff name or choose a new start time.");
+      showNotice("error", "Modify", "Enter a new staff name, choose a new day, or choose a new start time.");
       return;
     }
 
@@ -1149,6 +1165,7 @@ function AppBody() {
     setModifySessionKey("");
     setModifyStaff("");
     setModifyStartIndex("");
+    setModifyDay("");
   }
 
   function revertTrackChanges() {
@@ -1607,6 +1624,22 @@ function AppBody() {
                     onChange={(e) => setModifyStaff(e.target.value)}
                     placeholder={selectedEditableSession?.Staff || "New staff name"}
                   />
+                </div>
+                <div className="modify-row">
+                  <label htmlFor="modify-day">New Day</label>
+                  <select
+                    id="modify-day"
+                    className="track-select"
+                    value={modifyDay}
+                    onChange={(e) => setModifyDay(e.target.value)}
+                  >
+                    <option value="">Keep current</option>
+                    {DAYS.map((day) => (
+                      <option key={`modify-day-${day}`} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="modify-row">
                   <label htmlFor="modify-time">New Start Slot</label>
