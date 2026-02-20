@@ -1007,6 +1007,94 @@ textarea {
   background: #f8fafc;
 }
 
+.planner-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.planner-controls label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #1e3a8a;
+}
+
+.planner-controls .track-select {
+  min-width: 160px;
+}
+
+.planner-manual-panel,
+.planner-results {
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.planner-manual-panel h3,
+.planner-results h3 {
+  margin: 0;
+  font-size: 0.92rem;
+  color: #0f172a;
+}
+
+.planner-manual-list,
+.planner-result-list {
+  display: grid;
+  gap: 8px;
+}
+
+.planner-manual-item,
+.planner-result-item {
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.planner-result-item.improves {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.planner-manual-head,
+.planner-result-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.planner-manual-head strong,
+.planner-result-head strong {
+  font-size: 0.82rem;
+}
+
+.planner-manual-head label {
+  font-size: 0.78rem;
+  color: #334155;
+}
+
+.planner-score-line {
+  margin: 0;
+  font-size: 0.78rem;
+  color: #334155;
+}
+
+.planner-change-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
 .dot {
   width: 10px;
   height: 10px;

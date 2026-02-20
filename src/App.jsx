@@ -18,6 +18,8 @@ const TIME_FORMAT_KEY = "scheduleTimeFormatV1";
 const PRESET_C1_MODIFIED_ID = "preset-c1-modified";
 const FORCED_STAFF_NAME = "Islam Bendary";
 const FORCED_STAFF_GROUPS = new Set(["C1", "C2", "B5", "B6", "B1", "B2", "A5", "A6", "C3", "C4", "B7", "B8"]);
+const LATE_THRESHOLD_MINUTES = 16 * 60 + 15;
+const MAX_PLAN_SEARCH_LIMIT = 20000;
 const DAY_WEEK_BY_NAME = {
   Sunday: 1,
   Monday: 2,
@@ -262,6 +264,26 @@ function formatSessionTimeLabel(rawTime, format) {
   return formatSlotLabel(`${startRaw} - ${endRaw}`, format);
 }
 
+function sessionsOverlap(a, b) {
+  const dayA = normalizeDay(a);
+  const dayB = normalizeDay(b);
+  if (dayA !== dayB) return false;
+  const rangeA = slotRange(a);
+  const rangeB = slotRange(b);
+  if (!rangeA || !rangeB) return false;
+  return rangesOverlap(rangeA, rangeB);
+}
+
+function countSessionConflicts(sessions) {
+  let total = 0;
+  for (let i = 0; i < sessions.length; i += 1) {
+    for (let j = i + 1; j < sessions.length; j += 1) {
+      if (sessionsOverlap(sessions[i], sessions[j])) total += 1;
+    }
+  }
+  return total;
+}
+
 function AppBody() {
   const [courses, setCourses] = useState([]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -278,6 +300,12 @@ function AppBody() {
   const [recommendSearch, setRecommendSearch] = useState("");
   const [recommendTypeFilter, setRecommendTypeFilter] = useState("all");
   const [recommendDayFilter, setRecommendDayFilter] = useState("all");
+  const [showDamagePlanner, setShowDamagePlanner] = useState(false);
+  const [showPlannerManual, setShowPlannerManual] = useState(false);
+  const [plannerMaxChanges, setPlannerMaxChanges] = useState(2);
+  const [plannerLocks, setPlannerLocks] = useState({});
+  const [plannerChangeFlags, setPlannerChangeFlags] = useState({});
+  const [damagePlans, setDamagePlans] = useState([]);
   const [customTrackOptions, setCustomTrackOptions] = useState([]);
   const [trackOverrides, setTrackOverrides] = useState({});
   const [removedModifiedTrackIds, setRemovedModifiedTrackIds] = useState([]);
@@ -356,6 +384,76 @@ function AppBody() {
     }
     return map;
   }, [courses]);
+
+  const registeredCourseAlternatives = useMemo(() => {
+    const out = [];
+    for (const reg of registrations) {
+      const course = coursesById.get(reg.courseId);
+      const groups = groupsByCourseId.get(reg.courseId);
+      if (!course || !groups) continue;
+
+      const lectureChoices = groups.lectures || [];
+      const sectionChoices = groups.subgroups || [];
+      if (!lectureChoices.length) continue;
+
+      const currentLectureId = reg.selectedGroupIds.find((id) => lectureChoices.some((g) => g.id === Number(id))) || null;
+      const currentSectionId = reg.selectedGroupIds.find((id) => sectionChoices.some((g) => g.id === Number(id))) || null;
+
+      const combos = [];
+      for (const lecture of lectureChoices) {
+        if (!sectionChoices.length) {
+          const ids = [lecture.id];
+          combos.push({
+            key: ids.join("-"),
+            groupIds: ids,
+            lectureId: lecture.id,
+            sectionId: null,
+            label: `${lecture.name}`,
+          });
+          continue;
+        }
+
+        for (const section of sectionChoices) {
+          const ids = [lecture.id, section.id];
+          combos.push({
+            key: ids.join("-"),
+            groupIds: ids,
+            lectureId: lecture.id,
+            sectionId: section.id,
+            label: `${lecture.name} + ${pairedSectionLabel(section.name)}`,
+          });
+        }
+      }
+
+      const currentKey = [currentLectureId, ...(currentSectionId ? [currentSectionId] : [])].join("-");
+      out.push({
+        courseId: course.id,
+        courseName: course.name,
+        currentKey,
+        combos,
+        hasSections: sectionChoices.length > 0,
+      });
+    }
+    return out;
+  }, [registrations, coursesById, groupsByCourseId]);
+
+  useEffect(() => {
+    const validCourseIds = new Set(registeredCourseAlternatives.map((item) => item.courseId));
+    setPlannerLocks((prev) => {
+      const next = {};
+      for (const [courseId, value] of Object.entries(prev)) {
+        if (validCourseIds.has(courseId)) next[courseId] = value;
+      }
+      return next;
+    });
+    setPlannerChangeFlags((prev) => {
+      const next = {};
+      for (const [courseId, value] of Object.entries(prev)) {
+        if (validCourseIds.has(courseId)) next[courseId] = value;
+      }
+      return next;
+    });
+  }, [registeredCourseAlternatives]);
 
   const currentForCourse = registrations.find((r) => r.courseId === selectedCourseId);
   const currentLectureId = currentForCourse?.selectedGroupIds?.find((id) => lectureGroups.some((g) => g.id === id)) || "";
@@ -756,7 +854,7 @@ function AppBody() {
       if (!occupied.has(day) || !range) continue;
       for (let i = range.start; i < range.end; i += 1) occupied.get(day).add(i);
       const startMin = slotStartByIndex[range.start];
-      if ((startMin ?? -1) >= 16 * 60) {
+      if ((startMin ?? -1) >= LATE_THRESHOLD_MINUTES) {
         const key = `${day}|${s.courseId || s.courseName}|${s.GroupId}|${s.Time}`;
         lateSessions.add(key);
       }
@@ -777,18 +875,22 @@ function AppBody() {
     }
 
     const after4Sessions = lateSessions.size;
+    const conflictCount = countSessionConflicts(sessions);
     const scoreDays = Math.max(0, 100 - Math.max(0, activeDays - 1) * 18);
     const scoreGaps = Math.max(0, 100 - gapSlots * 10);
     const scoreLate = Math.max(0, 100 - after4Sessions * 24);
-    const overall = Math.round(scoreDays * 0.4 + scoreGaps * 0.35 + scoreLate * 0.25);
+    const scoreConflict = Math.max(0, 100 - conflictCount * 40);
+    const overall = Math.round(scoreDays * 0.34 + scoreGaps * 0.3 + scoreLate * 0.2 + scoreConflict * 0.16);
 
     return {
       activeDays,
       gapSlots,
       after4Sessions,
+      conflictCount,
       scoreDays,
       scoreGaps,
       scoreLate,
+      scoreConflict,
       overall,
     };
   }
@@ -847,6 +949,134 @@ function AppBody() {
     });
     return sorted;
   }, [allTrackCandidates, rankingCriterion]);
+
+  const currentDamageScore = useMemo(() => {
+    return (
+      currentScheduleScore.conflictCount * 1200 +
+      currentScheduleScore.gapSlots * 18 +
+      currentScheduleScore.after4Sessions * 28 +
+      currentScheduleScore.activeDays * 4
+    );
+  }, [currentScheduleScore]);
+
+  function generateDamagePlans() {
+    if (!registeredCourseAlternatives.length) {
+      setDamagePlans([]);
+      showNotice("info", "Damage Planner", "Register at least one course first.");
+      return;
+    }
+
+    const coursesToPlan = registeredCourseAlternatives.map((item) => {
+      const lockKey = plannerLocks[item.courseId] || "";
+      const lockMatch = item.combos.find((combo) => combo.key === lockKey);
+      const allowChange = plannerChangeFlags[item.courseId] !== false;
+
+      const filtered = lockMatch ? [lockMatch] : item.combos;
+      const choices = filtered.map((combo) => ({
+        ...combo,
+        changeCost: combo.key === item.currentKey ? 0 : 1,
+      }));
+
+      return {
+        ...item,
+        allowChange,
+        choices,
+      };
+    });
+
+    const ordered = [...coursesToPlan].sort((a, b) => a.choices.length - b.choices.length);
+    const pool = [];
+    let explored = 0;
+
+    const dfs = (index, selectedChoices, changeCount) => {
+      if (explored >= MAX_PLAN_SEARCH_LIMIT) return;
+      if (changeCount > plannerMaxChanges) return;
+
+      if (index >= ordered.length) {
+        explored += 1;
+
+        const nextRegistrations = registrations.map((reg) => {
+          const picked = selectedChoices.get(reg.courseId);
+          if (!picked) return reg;
+          return {
+            ...reg,
+            selectedGroupIds: picked.groupIds,
+          };
+        });
+
+        const sessions = flattenSessions(coursesById, nextRegistrations);
+        const score = evaluateSchedule(sessions);
+        const damage =
+          score.conflictCount * 1200 + score.gapSlots * 18 + score.after4Sessions * 28 + score.activeDays * 4;
+
+        const changed = [];
+        for (const course of coursesToPlan) {
+          const nextChoice = selectedChoices.get(course.courseId);
+          if (!nextChoice || nextChoice.key === course.currentKey) continue;
+          const currentChoice = course.combos.find((combo) => combo.key === course.currentKey);
+          changed.push({
+            courseId: course.courseId,
+            courseName: course.courseName,
+            from: currentChoice?.label || "Current",
+            to: nextChoice.label,
+          });
+        }
+
+        pool.push({
+          id: `plan-${pool.length + 1}`,
+          changes: changed,
+          changeCount: changed.length,
+          nextRegistrations,
+          score,
+          damage,
+          improves: damage < currentDamageScore,
+        });
+        return;
+      }
+
+      const course = ordered[index];
+      for (const choice of course.choices) {
+        if (!course.allowChange && choice.key !== course.currentKey) continue;
+        selectedChoices.set(course.courseId, choice);
+        dfs(index + 1, selectedChoices, changeCount + choice.changeCost);
+        selectedChoices.delete(course.courseId);
+      }
+    };
+
+    dfs(0, new Map(), 0);
+
+    const ranked = pool
+      .sort((a, b) => {
+        if (a.damage !== b.damage) return a.damage - b.damage;
+        if (a.changeCount !== b.changeCount) return a.changeCount - b.changeCount;
+        return b.score.overall - a.score.overall;
+      })
+      .slice(0, 8);
+
+    setDamagePlans(ranked);
+    setShowDamagePlanner(true);
+    if (!ranked.length) {
+      showNotice("info", "Damage Planner", "No valid plan found with current limits.");
+      return;
+    }
+
+    const improved = ranked.filter((plan) => plan.improves).length;
+    showNotice(
+      "success",
+      "Damage Planner",
+      improved
+        ? `Found ${improved} improving plans. Fewer changes are prioritized.`
+        : "Plans generated, but no plan improved the current damage score."
+    );
+  }
+
+  function applyDamagePlan(planId) {
+    const plan = damagePlans.find((item) => item.id === planId);
+    if (!plan) return;
+    setRegistrations(plan.nextRegistrations);
+    setPreview({});
+    showNotice("success", "Plan Applied", `Applied plan with ${plan.changeCount} change(s).`);
+  }
 
   function showNotice(type, title, message) {
     setNotice({ type, title, message });
@@ -919,6 +1149,9 @@ function AppBody() {
     setPreview({});
     setGlobalTrack(null);
     setGlobalTrackPick("");
+    setDamagePlans([]);
+    setPlannerLocks({});
+    setPlannerChangeFlags({});
     setTrackOverrides({});
     setCustomTrackOptions([]);
     setRemovedModifiedTrackIds([]);
@@ -1757,10 +1990,110 @@ function AppBody() {
                 </span>
                 {showAnalytics ? "Hide Analytics" : "Analytics"}
               </button>
+              <button className="mini" type="button" onClick={generateDamagePlans}>
+                Suggest Low-Damage Plans
+              </button>
+              <button className="mini" type="button" onClick={() => setShowPlannerManual((v) => !v)}>
+                {showPlannerManual ? "Hide Section Picker" : "Section Picker"}
+              </button>
             </div>
 
             {showAnalytics && (
               <>
+                <div className="planner-controls">
+                  <label htmlFor="planner-max-changes">Max changes</label>
+                  <select
+                    id="planner-max-changes"
+                    className="track-select"
+                    value={plannerMaxChanges}
+                    onChange={(e) => setPlannerMaxChanges(Number(e.target.value) || 1)}
+                  >
+                    <option value={1}>1 change</option>
+                    <option value={2}>2 changes</option>
+                    <option value={3}>3 changes</option>
+                  </select>
+                </div>
+
+                {showPlannerManual && registeredCourseAlternatives.length > 0 && (
+                  <div className="planner-manual-panel">
+                    <h3>Optional Section Picker</h3>
+                    <div className="planner-manual-list">
+                      {registeredCourseAlternatives.map((course) => (
+                        <article key={`planner-course-${course.courseId}`} className="planner-manual-item">
+                          <div className="planner-manual-head">
+                            <strong>{course.courseName}</strong>
+                            <label>
+                              <input
+                                type="checkbox"
+                                checked={plannerChangeFlags[course.courseId] !== false}
+                                onChange={(e) =>
+                                  setPlannerChangeFlags((prev) => ({
+                                    ...prev,
+                                    [course.courseId]: e.target.checked,
+                                  }))
+                                }
+                              />{" "}
+                              Allow change
+                            </label>
+                          </div>
+                          <select
+                            className="track-select"
+                            value={plannerLocks[course.courseId] || ""}
+                            onChange={(e) =>
+                              setPlannerLocks((prev) => ({
+                                ...prev,
+                                [course.courseId]: e.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">Auto (any available)</option>
+                            {course.combos.map((combo) => (
+                              <option key={`planner-lock-${course.courseId}-${combo.key}`} value={combo.key}>
+                                {combo.label}
+                              </option>
+                            ))}
+                          </select>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {showDamagePlanner && damagePlans.length > 0 && (
+                  <div className="planner-results">
+                    <h3>Low-Damage Plan Suggestions</h3>
+                    <div className="planner-result-list">
+                      {damagePlans.map((plan) => (
+                        <article key={plan.id} className={`planner-result-item ${plan.improves ? "improves" : ""}`}>
+                          <div className="planner-result-head">
+                            <strong>
+                              {plan.improves ? "Improves current schedule" : "Fallback plan"} | {plan.changeCount} change(s)
+                            </strong>
+                            <button className="mini" type="button" onClick={() => applyDamagePlan(plan.id)}>
+                              Apply Plan
+                            </button>
+                          </div>
+                          <p className="planner-score-line">
+                            Score {plan.score.overall} | Days {plan.score.activeDays} | Gaps {plan.score.gapSlots} |
+                            After 4:15 {plan.score.after4Sessions} | Conflicts {plan.score.conflictCount}
+                          </p>
+                          {plan.changes.length > 0 ? (
+                            <ul className="planner-change-list">
+                              {plan.changes.map((change) => (
+                                <li key={`${plan.id}-${change.courseId}`}>
+                                  <strong>{change.courseName}</strong>: {change.from} {"->"} {change.to}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="muted score-line">No change needed for this plan.</p>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 {tableSessions.length > 0 && (
                   <div className="free-time-grid">
                     {Array.from(freeTimeByDay.keys()).map((day) => {
@@ -1784,7 +2117,7 @@ function AppBody() {
                       <span className="metric-badge overall">Score {currentScheduleScore.overall}/100</span>
                       <span className="metric-badge days">Days {currentScheduleScore.activeDays}</span>
                       <span className="metric-badge gaps">Gaps {currentScheduleScore.gapSlots}</span>
-                      <span className="metric-badge late">After 4 PM {currentScheduleScore.after4Sessions}</span>
+                      <span className="metric-badge late">After 4:15 PM {currentScheduleScore.after4Sessions}</span>
                     </div>
                   </div>
                 )}
@@ -1801,7 +2134,7 @@ function AppBody() {
                         <option value="balanced">Best Overall</option>
                         <option value="days">Fewest Days</option>
                         <option value="gaps">Fewest Gaps</option>
-                        <option value="late">No Sessions After 4 PM</option>
+                        <option value="late">No Sessions After 4:15 PM</option>
                       </select>
                     </div>
                     <div className="ranked-tracks">
@@ -1814,7 +2147,7 @@ function AppBody() {
                         >
                           <span>{c.name}</span>
                           <small>
-                            Score {c.score.overall} | Days {c.score.activeDays} | Gaps {c.score.gapSlots} | After 4:{" "}
+                            Score {c.score.overall} | Days {c.score.activeDays} | Gaps {c.score.gapSlots} | After 4:15:{" "}
                             {c.score.after4Sessions}
                           </small>
                         </button>
