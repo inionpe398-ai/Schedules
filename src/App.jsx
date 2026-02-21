@@ -300,8 +300,10 @@ function AppBody() {
   const [recommendSearch, setRecommendSearch] = useState("");
   const [recommendTypeFilter, setRecommendTypeFilter] = useState("all");
   const [recommendDayFilter, setRecommendDayFilter] = useState("all");
-  const [showDamagePlanner, setShowDamagePlanner] = useState(false);
+  const [showPlannerModal, setShowPlannerModal] = useState(false);
+  const [plannerModalTab, setPlannerModalTab] = useState("panel");
   const [showPlannerManual, setShowPlannerManual] = useState(false);
+  const [plannerPreviewPlanId, setPlannerPreviewPlanId] = useState("");
   const [plannerMaxChanges, setPlannerMaxChanges] = useState(2);
   const [plannerLocks, setPlannerLocks] = useState({});
   const [plannerChangeFlags, setPlannerChangeFlags] = useState({});
@@ -454,6 +456,16 @@ function AppBody() {
       return next;
     });
   }, [registeredCourseAlternatives]);
+
+  useEffect(() => {
+    if (!damagePlans.length) {
+      setPlannerPreviewPlanId("");
+      return;
+    }
+    if (!plannerPreviewPlanId || !damagePlans.some((plan) => plan.id === plannerPreviewPlanId)) {
+      setPlannerPreviewPlanId(damagePlans[0].id);
+    }
+  }, [damagePlans, plannerPreviewPlanId]);
 
   const currentForCourse = registrations.find((r) => r.courseId === selectedCourseId);
   const currentLectureId = currentForCourse?.selectedGroupIds?.find((id) => lectureGroups.some((g) => g.id === id)) || "";
@@ -633,8 +645,25 @@ function AppBody() {
     return out;
   }, [globalTrack, courses, trackOverrides, trackById]);
 
+  const plannerPreviewPlan = useMemo(
+    () => damagePlans.find((plan) => plan.id === plannerPreviewPlanId) || null,
+    [damagePlans, plannerPreviewPlanId]
+  );
+  const plannerPreviewActive = showPlannerModal && plannerModalTab === "preview" && Boolean(plannerPreviewPlan);
+  const plannerPreviewSessions = useMemo(() => {
+    if (!plannerPreviewPlan) return [];
+    return flattenSessions(coursesById, plannerPreviewPlan.nextRegistrations).map((session) => ({
+      ...session,
+      source: "planner-preview",
+      isModified: true,
+      modifiedReason: "Preview plan",
+    }));
+  }, [plannerPreviewPlan, coursesById]);
+
   const tableSessions = useMemo(() => {
-    const all = [...registeredSessions, ...globalTrackSessions, ...previewSessions];
+    const all = plannerPreviewActive
+      ? [...plannerPreviewSessions]
+      : [...registeredSessions, ...globalTrackSessions, ...previewSessions];
     const seen = new Set();
     const output = [];
 
@@ -643,7 +672,7 @@ function AppBody() {
       let isModified = Boolean(s.isModified);
       let modifiedReason = s.modifiedReason || "";
 
-      if (s.source !== "track") {
+      if (s.source !== "track" && s.source !== "planner-preview") {
         const globalKey = sessionKeyForTrack(normalized.courseId || "", normalized);
         const globalOverride = globalOverridesMap[globalKey];
         if (globalOverride) {
@@ -657,7 +686,7 @@ function AppBody() {
         }
       }
 
-      if (shouldSyncWithModified && s.source !== "track") {
+      if (shouldSyncWithModified && s.source !== "track" && s.source !== "planner-preview") {
         const adjusted = applyTrackSpecificAdjustments(
           normalized,
           normalized.courseId || "",
@@ -681,6 +710,8 @@ function AppBody() {
     return output;
   }, [
     registeredSessions,
+    plannerPreviewActive,
+    plannerPreviewSessions,
     globalTrackSessions,
     previewSessions,
     globalOverridesMap,
@@ -1054,7 +1085,12 @@ function AppBody() {
       .slice(0, 8);
 
     setDamagePlans(ranked);
-    setShowDamagePlanner(true);
+    setShowPlannerModal(true);
+    setPlannerModalTab("panel");
+    setPlannerPreviewPlanId((prev) => {
+      if (prev && ranked.some((plan) => plan.id === prev)) return prev;
+      return ranked[0]?.id || "";
+    });
     if (!ranked.length) {
       showNotice("info", "Damage Planner", "No valid plan found with current limits.");
       return;
@@ -1075,6 +1111,8 @@ function AppBody() {
     if (!plan) return;
     setRegistrations(plan.nextRegistrations);
     setPreview({});
+    setShowPlannerModal(false);
+    setPlannerModalTab("panel");
     showNotice("success", "Plan Applied", `Applied plan with ${plan.changeCount} change(s).`);
   }
 
@@ -1150,6 +1188,9 @@ function AppBody() {
     setGlobalTrack(null);
     setGlobalTrackPick("");
     setDamagePlans([]);
+    setShowPlannerModal(false);
+    setPlannerModalTab("panel");
+    setPlannerPreviewPlanId("");
     setPlannerLocks({});
     setPlannerChangeFlags({});
     setTrackOverrides({});
@@ -1940,7 +1981,9 @@ function AppBody() {
                       return (
                         <article
                           key={`${day}-${s.courseName}-${s.GroupId}-${idx}-${s.Time}`}
-                          className={`lesson ${blockKindByType(s.Type)} ${s.source === "preview" ? "preview" : ""} ${
+                          className={`lesson ${blockKindByType(s.Type)} ${
+                            s.source === "preview" || s.source === "planner-preview" ? "preview" : ""
+                          } ${
                             s.source === "track" ? "track" : ""
                           } ${s.isModified ? "modified" : ""} ${
                             globalTrack?.isModified && s.source === "track" ? "modified-track" : ""
@@ -1990,110 +2033,23 @@ function AppBody() {
                 </span>
                 {showAnalytics ? "Hide Analytics" : "Analytics"}
               </button>
-              <button className="mini" type="button" onClick={generateDamagePlans}>
-                Suggest Low-Damage Plans
-              </button>
-              <button className="mini" type="button" onClick={() => setShowPlannerManual((v) => !v)}>
-                {showPlannerManual ? "Hide Section Picker" : "Section Picker"}
+              <button
+                className="mini"
+                type="button"
+                onClick={() => {
+                  if (!damagePlans.length) {
+                    generateDamagePlans();
+                    return;
+                  }
+                  setShowPlannerModal(true);
+                }}
+              >
+                Open Damage Planner
               </button>
             </div>
 
             {showAnalytics && (
               <>
-                <div className="planner-controls">
-                  <label htmlFor="planner-max-changes">Max changes</label>
-                  <select
-                    id="planner-max-changes"
-                    className="track-select"
-                    value={plannerMaxChanges}
-                    onChange={(e) => setPlannerMaxChanges(Number(e.target.value) || 1)}
-                  >
-                    <option value={1}>1 change</option>
-                    <option value={2}>2 changes</option>
-                    <option value={3}>3 changes</option>
-                  </select>
-                </div>
-
-                {showPlannerManual && registeredCourseAlternatives.length > 0 && (
-                  <div className="planner-manual-panel">
-                    <h3>Optional Section Picker</h3>
-                    <div className="planner-manual-list">
-                      {registeredCourseAlternatives.map((course) => (
-                        <article key={`planner-course-${course.courseId}`} className="planner-manual-item">
-                          <div className="planner-manual-head">
-                            <strong>{course.courseName}</strong>
-                            <label>
-                              <input
-                                type="checkbox"
-                                checked={plannerChangeFlags[course.courseId] !== false}
-                                onChange={(e) =>
-                                  setPlannerChangeFlags((prev) => ({
-                                    ...prev,
-                                    [course.courseId]: e.target.checked,
-                                  }))
-                                }
-                              />{" "}
-                              Allow change
-                            </label>
-                          </div>
-                          <select
-                            className="track-select"
-                            value={plannerLocks[course.courseId] || ""}
-                            onChange={(e) =>
-                              setPlannerLocks((prev) => ({
-                                ...prev,
-                                [course.courseId]: e.target.value,
-                              }))
-                            }
-                          >
-                            <option value="">Auto (any available)</option>
-                            {course.combos.map((combo) => (
-                              <option key={`planner-lock-${course.courseId}-${combo.key}`} value={combo.key}>
-                                {combo.label}
-                              </option>
-                            ))}
-                          </select>
-                        </article>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {showDamagePlanner && damagePlans.length > 0 && (
-                  <div className="planner-results">
-                    <h3>Low-Damage Plan Suggestions</h3>
-                    <div className="planner-result-list">
-                      {damagePlans.map((plan) => (
-                        <article key={plan.id} className={`planner-result-item ${plan.improves ? "improves" : ""}`}>
-                          <div className="planner-result-head">
-                            <strong>
-                              {plan.improves ? "Improves current schedule" : "Fallback plan"} | {plan.changeCount} change(s)
-                            </strong>
-                            <button className="mini" type="button" onClick={() => applyDamagePlan(plan.id)}>
-                              Apply Plan
-                            </button>
-                          </div>
-                          <p className="planner-score-line">
-                            Score {plan.score.overall} | Days {plan.score.activeDays} | Gaps {plan.score.gapSlots} |
-                            After 4:15 {plan.score.after4Sessions} | Conflicts {plan.score.conflictCount}
-                          </p>
-                          {plan.changes.length > 0 ? (
-                            <ul className="planner-change-list">
-                              {plan.changes.map((change) => (
-                                <li key={`${plan.id}-${change.courseId}`}>
-                                  <strong>{change.courseName}</strong>: {change.from} {"->"} {change.to}
-                                </li>
-                              ))}
-                            </ul>
-                          ) : (
-                            <p className="muted score-line">No change needed for this plan.</p>
-                          )}
-                        </article>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
                 {tableSessions.length > 0 && (
                   <div className="free-time-grid">
                     {Array.from(freeTimeByDay.keys()).map((day) => {
@@ -2244,6 +2200,199 @@ function AppBody() {
               </>
             )}
           </div>
+          {showPlannerModal && (
+            <div className="planner-modal-overlay" role="dialog" aria-modal="true" aria-label="Damage Planner">
+              <div className="planner-modal">
+                <div className="planner-modal-head">
+                  <h3>Damage Planner</h3>
+                  <div className="planner-modal-actions">
+                    <button
+                      type="button"
+                      className={`mini ${plannerModalTab === "panel" ? "on" : ""}`}
+                      onClick={() => setPlannerModalTab("panel")}
+                    >
+                      Control Panel
+                    </button>
+                    <button
+                      type="button"
+                      className={`mini ${plannerModalTab === "preview" ? "on" : ""}`}
+                      onClick={() => setPlannerModalTab("preview")}
+                      disabled={!plannerPreviewPlanId}
+                    >
+                      Preview
+                    </button>
+                    <button className="mini" type="button" onClick={() => setShowPlannerModal(false)}>
+                      Close
+                    </button>
+                  </div>
+                </div>
+
+                {plannerModalTab === "panel" && (
+                  <div className="planner-modal-body">
+                    <div className="planner-controls">
+                      <label htmlFor="planner-max-changes">Max changes</label>
+                      <select
+                        id="planner-max-changes"
+                        className="track-select"
+                        value={plannerMaxChanges}
+                        onChange={(e) => setPlannerMaxChanges(Number(e.target.value) || 1)}
+                      >
+                        <option value={1}>1 change</option>
+                        <option value={2}>2 changes</option>
+                        <option value={3}>3 changes</option>
+                      </select>
+                      <button className="mini" type="button" onClick={generateDamagePlans}>
+                        Regenerate
+                      </button>
+                      <button className="mini" type="button" onClick={() => setShowPlannerManual((v) => !v)}>
+                        {showPlannerManual ? "Hide Section Picker" : "Show Section Picker"}
+                      </button>
+                    </div>
+
+                    {showPlannerManual && registeredCourseAlternatives.length > 0 && (
+                      <div className="planner-manual-panel">
+                        <h3>Optional Section Picker</h3>
+                        <div className="planner-manual-list">
+                          {registeredCourseAlternatives.map((course) => (
+                            <article key={`planner-course-${course.courseId}`} className="planner-manual-item">
+                              <div className="planner-manual-head">
+                                <strong>{course.courseName}</strong>
+                                <label>
+                                  <input
+                                    type="checkbox"
+                                    checked={plannerChangeFlags[course.courseId] !== false}
+                                    onChange={(e) =>
+                                      setPlannerChangeFlags((prev) => ({
+                                        ...prev,
+                                        [course.courseId]: e.target.checked,
+                                      }))
+                                    }
+                                  />{" "}
+                                  Allow change
+                                </label>
+                              </div>
+                              <select
+                                className="track-select"
+                                value={plannerLocks[course.courseId] || ""}
+                                onChange={(e) =>
+                                  setPlannerLocks((prev) => ({
+                                    ...prev,
+                                    [course.courseId]: e.target.value,
+                                  }))
+                                }
+                              >
+                                <option value="">Auto (any available)</option>
+                                {course.combos.map((combo) => (
+                                  <option key={`planner-lock-${course.courseId}-${combo.key}`} value={combo.key}>
+                                    {combo.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="planner-results">
+                      <h3>Low-Damage Plan Suggestions</h3>
+                      {damagePlans.length > 0 ? (
+                        <div className="planner-result-list">
+                          {damagePlans.map((plan) => (
+                            <article key={plan.id} className={`planner-result-item ${plan.improves ? "improves" : ""}`}>
+                              <div className="planner-result-head">
+                                <strong>
+                                  {plan.improves ? "Improves current schedule" : "Fallback plan"} | {plan.changeCount} change(s)
+                                </strong>
+                                <div className="planner-result-actions">
+                                  <button
+                                    className="mini"
+                                    type="button"
+                                    onClick={() => {
+                                      setPlannerPreviewPlanId(plan.id);
+                                      setPlannerModalTab("preview");
+                                    }}
+                                  >
+                                    Preview
+                                  </button>
+                                  <button className="mini" type="button" onClick={() => applyDamagePlan(plan.id)}>
+                                    Apply
+                                  </button>
+                                </div>
+                              </div>
+                              <p className="planner-score-line">
+                                Score {plan.score.overall} | Days {plan.score.activeDays} | Gaps {plan.score.gapSlots} |
+                                After 4:15 {plan.score.after4Sessions} | Conflicts {plan.score.conflictCount}
+                              </p>
+                              {plan.changes.length > 0 ? (
+                                <ul className="planner-change-list">
+                                  {plan.changes.map((change) => (
+                                    <li key={`${plan.id}-${change.courseId}`}>
+                                      <strong>{change.courseName}</strong>: {change.from} {"->"} {change.to}
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="muted score-line">No change needed for this plan.</p>
+                              )}
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="muted score-line">No plans yet. Click Regenerate to create suggestions.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {plannerModalTab === "preview" && (
+                  <div className="planner-modal-body planner-preview-body">
+                    <div className="planner-controls">
+                      <label htmlFor="planner-preview-select">Plan</label>
+                      <select
+                        id="planner-preview-select"
+                        className="track-select"
+                        value={plannerPreviewPlanId}
+                        onChange={(e) => setPlannerPreviewPlanId(e.target.value)}
+                      >
+                        {damagePlans.map((plan) => (
+                          <option key={`preview-plan-${plan.id}`} value={plan.id}>
+                            {plan.improves ? "Improves" : "Fallback"} | {plan.changeCount} change(s) | Score {plan.score.overall}
+                          </option>
+                        ))}
+                      </select>
+                      <button className="mini" type="button" onClick={() => setPlannerModalTab("panel")}>
+                        Back To Panel
+                      </button>
+                    </div>
+                    {plannerPreviewPlan ? (
+                      <div className="planner-results">
+                        <h3>Preview Summary</h3>
+                        <p className="planner-score-line">
+                          Score {plannerPreviewPlan.score.overall} | Days {plannerPreviewPlan.score.activeDays} | Gaps{" "}
+                          {plannerPreviewPlan.score.gapSlots} | After 4:15 {plannerPreviewPlan.score.after4Sessions} |
+                          Conflicts {plannerPreviewPlan.score.conflictCount}
+                        </p>
+                        {plannerPreviewPlan.changes.length > 0 ? (
+                          <ul className="planner-change-list">
+                            {plannerPreviewPlan.changes.map((change) => (
+                              <li key={`preview-change-${plannerPreviewPlan.id}-${change.courseId}`}>
+                                <strong>{change.courseName}</strong>: {change.from} {"->"} {change.to}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="muted score-line">No changes in this preview plan.</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="muted score-line">Select a plan from the list to preview it on the timetable.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           <div className="legend">
             <span>

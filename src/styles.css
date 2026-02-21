@@ -1095,6 +1095,64 @@ textarea {
   font-size: 0.8rem;
 }
 
+.planner-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(15, 23, 42, 0.45);
+  display: grid;
+  place-items: center;
+  padding: 14px;
+}
+
+.planner-modal {
+  width: min(980px, 100%);
+  max-height: min(86vh, 860px);
+  overflow: auto;
+  border: 1px solid #cbd5e1;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 24px 52px rgba(15, 23, 42, 0.28);
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.planner-modal-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 10px;
+}
+
+.planner-modal-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.planner-modal-actions,
+.planner-result-actions {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.planner-modal-body {
+  display: grid;
+  gap: 10px;
+}
+
+.planner-preview-body .planner-results {
+  margin-top: 2px;
+}
+
 .dot {
   width: 10px;
   height: 10px;
