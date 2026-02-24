@@ -1,0 +1,24 @@
+[
+  {
+    "DayWeek": 7,
+    "DayWeekName": "Saturday",
+    "ClassRoomName": "Online-Class 2 (Delta University for Science and Technology Building)",
+    "GroupId": 990001,
+    "GroupName": "DU-A",
+    "StudentsCount": 1,
+    "NameEn": "didactic",
+    "BgColor": "#7cd77c",
+    "IsEveryWeek": true,
+    "IntervalId": 990001,
+    "IntervalsCount": 2,
+    "Time": "21:00:00 - 22:30:00",
+    "Staff": "Eman Mahros Mohamed El Mahdey",
+    "RegisteredCount": 1,
+    "IsSelected": false,
+    "Type": "Group",
+    "IsUniversity": false,
+    "ShortName": "Eco",
+    "NameEn_Faculty": "Economics",
+    "IsBlocked": false
+  }
+]

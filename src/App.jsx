@@ -1,8 +1,9 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { loadCourses } from "./lib/data";
 import {
   DAYS,
   TIME_SLOTS,
+  buildTimeSlots,
   blockKindByType,
   formatSlotLabel,
   forcedSpanByType,
@@ -15,6 +16,11 @@ import {
 
 const STORAGE_KEY = "scheduleManagerSelectionsV2";
 const TIME_FORMAT_KEY = "scheduleTimeFormatV1";
+const REGISTER_PRESETS_KEY = "scheduleRegisterPresetsV1";
+const SHARED_TRACK_OVERRIDES_KEY = "scheduleSharedTrackOverridesV1";
+const CUSTOM_TRACK_OPTIONS_KEY = "scheduleCustomTrackOptionsV1";
+const TRACK_OVERRIDES_KEY = "scheduleTrackOverridesV1";
+const REMOVED_MODIFIED_TRACK_IDS_KEY = "scheduleRemovedModifiedTrackIdsV1";
 const PRESET_C1_MODIFIED_ID = "preset-c1-modified";
 const FORCED_STAFF_NAME = "Islam Bendary";
 const FORCED_STAFF_GROUPS = new Set(["C1", "C2", "B5", "B6", "B1", "B2", "A5", "A6", "C3", "C4", "B7", "B8"]);
@@ -29,6 +35,97 @@ const DAY_WEEK_BY_NAME = {
   Friday: 6,
   Saturday: 7,
 };
+
+const TIME_PROFILES = {
+  regular: {
+    id: "regular",
+    label: "Regular (45m, 08:45-22:30)",
+    slots: TIME_SLOTS,
+  },
+  ramadan: {
+    id: "ramadan",
+    label: "Ramadan (30m, 09:00-21:30)",
+    slots: buildTimeSlots(9, 0, 21, 30, 30),
+  },
+};
+
+function sanitizeRegisterPresets(raw, courses) {
+  if (!Array.isArray(raw)) return [];
+  const ids = new Set(courses.map((c) => c.id));
+  return raw
+    .filter((item) => item && typeof item.name === "string")
+    .map((item) => {
+      const selections = Array.isArray(item.selections) ? item.selections : [];
+      return {
+        id: String(item.id || `preset-${Date.now()}`),
+        name: item.name.trim() || "Unnamed Preset",
+        selections: selections.filter(
+          (r) =>
+            r &&
+            ids.has(r.courseId) &&
+            Array.isArray(r.selectedGroupIds) &&
+            r.selectedGroupIds.length > 0
+        ),
+      };
+    })
+    .filter((item) => item.selections.length > 0);
+}
+
+function sanitizeCustomTrackOptions(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((item) => {
+      const sections = Array.isArray(item?.sections)
+        ? item.sections.map((s) => String(s || "").trim()).filter(Boolean)
+        : [];
+      if (!sections.length) return null;
+
+      const id = String(item?.id || "").trim();
+      const label = String(item?.label || "").trim();
+      const prefix = String(item?.prefix || "").trim().toUpperCase();
+      if (!id || !label || !prefix) return null;
+
+      return {
+        id,
+        label,
+        prefix,
+        sections,
+        isModified: item?.isModified !== false,
+        mode: "modified",
+        baseTrackId: String(item?.baseTrackId || "").trim() || undefined,
+      };
+    })
+    .filter(Boolean);
+}
+
+function sanitizeTrackOverrides(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const out = {};
+
+  for (const [trackId, rawMap] of Object.entries(raw)) {
+    if (!rawMap || typeof rawMap !== "object") continue;
+    const cleanMap = {};
+    for (const [sessionKey, payload] of Object.entries(rawMap)) {
+      if (!payload || typeof payload !== "object") continue;
+      const cleanPayload = {};
+      if (typeof payload.Staff === "string") cleanPayload.Staff = payload.Staff.trim();
+      if (typeof payload.Time === "string") cleanPayload.Time = payload.Time.trim();
+      if (typeof payload.DayWeekName === "string") cleanPayload.DayWeekName = payload.DayWeekName.trim();
+      if (payload.DayWeek != null && Number.isFinite(Number(payload.DayWeek))) {
+        cleanPayload.DayWeek = Number(payload.DayWeek);
+      }
+      if (Object.keys(cleanPayload).length) cleanMap[sessionKey] = cleanPayload;
+    }
+    if (Object.keys(cleanMap).length) out[trackId] = cleanMap;
+  }
+
+  return out;
+}
+
+function sanitizeRemovedModifiedTrackIds(raw) {
+  if (!Array.isArray(raw)) return [];
+  return Array.from(new Set(raw.map((id) => String(id || "").trim()).filter(Boolean)));
+}
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -219,22 +316,22 @@ function flattenSessions(coursesById, registrations) {
   return all;
 }
 
-function findConflict(candidate, existing) {
+function findConflict(candidate, existing, slots = TIME_SLOTS) {
   for (const a of candidate) {
     const dayA = normalizeDay(a);
-    const rangeA = slotRange(a);
+    const rangeA = slotRange(a, slots);
     if (!DAYS.includes(dayA) || !rangeA) continue;
 
     for (const b of existing) {
       const dayB = normalizeDay(b);
-      const rangeB = slotRange(b);
+      const rangeB = slotRange(b, slots);
       if (dayA !== dayB || !rangeB) continue;
 
       if (rangesOverlap(rangeA, rangeB)) {
         return {
           day: dayA,
           existing: b,
-          overlap: overlapLabel(rangeA, rangeB),
+          overlap: overlapLabel(rangeA, rangeB, slots),
         };
       }
     }
@@ -264,24 +361,37 @@ function formatSessionTimeLabel(rawTime, format) {
   return formatSlotLabel(`${startRaw} - ${endRaw}`, format);
 }
 
-function sessionsOverlap(a, b) {
+function sessionsOverlap(a, b, slots = TIME_SLOTS) {
   const dayA = normalizeDay(a);
   const dayB = normalizeDay(b);
   if (dayA !== dayB) return false;
-  const rangeA = slotRange(a);
-  const rangeB = slotRange(b);
+  const rangeA = slotRange(a, slots);
+  const rangeB = slotRange(b, slots);
   if (!rangeA || !rangeB) return false;
   return rangesOverlap(rangeA, rangeB);
 }
 
-function countSessionConflicts(sessions) {
+function countSessionConflicts(sessions, slots = TIME_SLOTS) {
   let total = 0;
   for (let i = 0; i < sessions.length; i += 1) {
     for (let j = i + 1; j < sessions.length; j += 1) {
-      if (sessionsOverlap(sessions[i], sessions[j])) total += 1;
+      if (sessionsOverlap(sessions[i], sessions[j], slots)) total += 1;
     }
   }
   return total;
+}
+
+function sessionVerticalMergeSignature(session) {
+  return [
+    session.courseId || session.courseName || "",
+    session.courseName || "",
+    session.Time || "",
+    session.GroupName || "",
+    session.ClassRoomName || "",
+    session.Staff || "",
+    session.Type || "",
+    session.isModified ? "1" : "0",
+  ].join("|");
 }
 
 function AppBody() {
@@ -295,6 +405,10 @@ function AppBody() {
   const [globalTrackPick, setGlobalTrackPick] = useState("");
   const [globalTrack, setGlobalTrack] = useState(null);
   const [registrationView, setRegistrationView] = useState("lectures");
+  const [timeProfile, setTimeProfile] = useState("regular");
+  const [registerPresets, setRegisterPresets] = useState([]);
+  const [selectedRegisterPresetId, setSelectedRegisterPresetId] = useState("");
+  const [dayExplorer, setDayExplorer] = useState("all");
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [rankingCriterion, setRankingCriterion] = useState("balanced");
   const [recommendSearch, setRecommendSearch] = useState("");
@@ -310,7 +424,9 @@ function AppBody() {
   const [damagePlans, setDamagePlans] = useState([]);
   const [customTrackOptions, setCustomTrackOptions] = useState([]);
   const [trackOverrides, setTrackOverrides] = useState({});
+  const [sharedTrackOverrides, setSharedTrackOverrides] = useState({});
   const [removedModifiedTrackIds, setRemovedModifiedTrackIds] = useState([]);
+  const [isHydrated, setIsHydrated] = useState(false);
   const [showModifyPanel, setShowModifyPanel] = useState(false);
   const [modifyMode, setModifyMode] = useState("regular");
   const [modifyTrackId, setModifyTrackId] = useState("");
@@ -325,6 +441,10 @@ function AppBody() {
   const scheduleRef = useRef(null);
 
   const coursesById = useMemo(() => new Map(courses.map((c) => [c.id, c])), [courses]);
+  const currentTimeSlots = useMemo(() => {
+    const profile = TIME_PROFILES[timeProfile];
+    return Array.isArray(profile?.slots) && profile.slots.length ? profile.slots : TIME_SLOTS;
+  }, [timeProfile]);
 
   useEffect(() => {
     loadCourses()
@@ -340,17 +460,95 @@ function AppBody() {
         }
 
         setRegistrations(normalizeRegistrations(loaded, parsed));
+
+        let rawPresets = [];
+        try {
+          const savedPresets = localStorage.getItem(REGISTER_PRESETS_KEY);
+          rawPresets = savedPresets ? JSON.parse(savedPresets) : [];
+        } catch {
+          rawPresets = [];
+        }
+        setRegisterPresets(sanitizeRegisterPresets(rawPresets, loaded));
+
+        let sharedOverrides = {};
+        try {
+          const savedOverrides = localStorage.getItem(SHARED_TRACK_OVERRIDES_KEY);
+          const parsedOverrides = savedOverrides ? JSON.parse(savedOverrides) : {};
+          sharedOverrides = parsedOverrides && typeof parsedOverrides === "object" ? parsedOverrides : {};
+        } catch {
+          sharedOverrides = {};
+        }
+        setSharedTrackOverrides(sharedOverrides);
+
+        let rawCustomTracks = [];
+        try {
+          const savedCustomTracks = localStorage.getItem(CUSTOM_TRACK_OPTIONS_KEY);
+          rawCustomTracks = savedCustomTracks ? JSON.parse(savedCustomTracks) : [];
+        } catch {
+          rawCustomTracks = [];
+        }
+        setCustomTrackOptions(sanitizeCustomTrackOptions(rawCustomTracks));
+
+        let rawTrackOverrides = {};
+        try {
+          const savedTrackOverrides = localStorage.getItem(TRACK_OVERRIDES_KEY);
+          rawTrackOverrides = savedTrackOverrides ? JSON.parse(savedTrackOverrides) : {};
+        } catch {
+          rawTrackOverrides = {};
+        }
+        setTrackOverrides(sanitizeTrackOverrides(rawTrackOverrides));
+
+        let rawRemovedTrackIds = [];
+        try {
+          const savedRemovedTrackIds = localStorage.getItem(REMOVED_MODIFIED_TRACK_IDS_KEY);
+          rawRemovedTrackIds = savedRemovedTrackIds ? JSON.parse(savedRemovedTrackIds) : [];
+        } catch {
+          rawRemovedTrackIds = [];
+        }
+        const removedTrackIds = sanitizeRemovedModifiedTrackIds(rawRemovedTrackIds);
+        if (!removedTrackIds.includes(PRESET_C1_MODIFIED_ID)) removedTrackIds.push(PRESET_C1_MODIFIED_ID);
+        setRemovedModifiedTrackIds(removedTrackIds);
+        setIsHydrated(true);
       })
-      .catch((e) => setError(e.message || "Failed to load courses."));
+      .catch((e) => {
+        setError(e.message || "Failed to load courses.");
+        setIsHydrated(true);
+      });
   }, []);
 
   useEffect(() => {
+    if (!isHydrated) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(registrations));
-  }, [registrations]);
+  }, [registrations, isHydrated]);
 
   useEffect(() => {
     localStorage.setItem(TIME_FORMAT_KEY, timeFormat);
   }, [timeFormat]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(REGISTER_PRESETS_KEY, JSON.stringify(registerPresets));
+  }, [registerPresets, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(SHARED_TRACK_OVERRIDES_KEY, JSON.stringify(sharedTrackOverrides));
+  }, [sharedTrackOverrides, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(CUSTOM_TRACK_OPTIONS_KEY, JSON.stringify(customTrackOptions));
+  }, [customTrackOptions, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(TRACK_OVERRIDES_KEY, JSON.stringify(trackOverrides));
+  }, [trackOverrides, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(REMOVED_MODIFIED_TRACK_IDS_KEY, JSON.stringify(removedModifiedTrackIds));
+  }, [removedModifiedTrackIds, isHydrated]);
 
   useEffect(() => {
     const onFsChange = () => {
@@ -370,6 +568,12 @@ function AppBody() {
     const timer = setTimeout(() => setNotice(null), 4000);
     return () => clearTimeout(timer);
   }, [notice]);
+
+  useEffect(() => {
+    if (!selectedRegisterPresetId) return;
+    if (registerPresets.some((preset) => preset.id === selectedRegisterPresetId)) return;
+    setSelectedRegisterPresetId("");
+  }, [registerPresets, selectedRegisterPresetId]);
 
   const selectedCourse = coursesById.get(selectedCourseId);
   const selectedGroups = selectedCourse ? collectGroups(selectedCourse) : [];
@@ -498,6 +702,23 @@ function AppBody() {
     return out;
   }, [courses, preview]);
 
+  const dayExplorerSessions = useMemo(() => {
+    if (dayExplorer === "all") return [];
+    const out = [];
+    for (const course of courses) {
+      for (const session of course.sessions) {
+        if (normalizeDay(session) !== dayExplorer) continue;
+        out.push({
+          ...session,
+          courseId: course.id,
+          courseName: course.name,
+          source: "day-explorer",
+        });
+      }
+    }
+    return out;
+  }, [courses, dayExplorer]);
+
   const applyStaffPreset = (session) => {
     const sectionName = String(session.GroupName || "").trim().toUpperCase();
     if (!FORCED_STAFF_GROUPS.has(sectionName)) return session;
@@ -541,19 +762,20 @@ function AppBody() {
   }, [baseTrackOptions, presetC1ModifiedTrack, customTrackOptions, removedModifiedTrackIds]);
 
   const trackById = useMemo(() => new Map(trackOptions.map((track) => [track.id, track])), [trackOptions]);
+  const removableModifiedTracks = useMemo(() => trackOptions.filter((track) => track.isModified), [trackOptions]);
   const activeTrackOption = useMemo(() => trackById.get(globalTrackPick) || null, [trackById, globalTrackPick]);
   const activeTrackOverrideMap = useMemo(
     () => (activeTrackOption ? trackOverrides[activeTrackOption.id] || {} : {}),
     [activeTrackOption, trackOverrides]
   );
   const globalOverridesMap = useMemo(() => {
-    const merged = {};
+    const merged = { ...(sharedTrackOverrides || {}) };
     for (const map of Object.values(trackOverrides || {})) {
       if (!map || typeof map !== "object") continue;
       Object.assign(merged, map);
     }
     return merged;
-  }, [trackOverrides]);
+  }, [trackOverrides, sharedTrackOverrides]);
   const shouldSyncWithModified = useMemo(
     () => Boolean(activeTrackOption && (activeTrackOption.isModified || Object.keys(activeTrackOverrideMap).length)),
     [activeTrackOption, activeTrackOverrideMap]
@@ -611,13 +833,22 @@ function AppBody() {
     }
   }, [globalTrackPick]);
 
+  useEffect(() => {
+    if (selectedRegisterPresetId && modifyMode === "new") {
+      setModifyMode("regular");
+    }
+  }, [selectedRegisterPresetId, modifyMode]);
+
   const globalTrackSessions = useMemo(() => {
     if (!globalTrack?.trackId || !globalTrack?.prefix) return [];
 
     const sectionSet = new Set((globalTrack.sections || []).map((s) => String(s).trim().toUpperCase()));
     const prefixUpper = globalTrack.prefix.toUpperCase();
     const trackId = globalTrack.trackId;
-    const trackOverrideMap = trackOverrides[trackId] || {};
+    const trackOverrideMap = {
+      ...globalOverridesMap,
+      ...(trackOverrides[trackId] || {}),
+    };
     const out = [];
 
     for (const course of courses) {
@@ -643,7 +874,7 @@ function AppBody() {
     }
 
     return out;
-  }, [globalTrack, courses, trackOverrides, trackById]);
+  }, [globalTrack, courses, trackOverrides, trackById, globalOverridesMap]);
 
   const plannerPreviewPlan = useMemo(
     () => damagePlans.find((plan) => plan.id === plannerPreviewPlanId) || null,
@@ -663,7 +894,7 @@ function AppBody() {
   const tableSessions = useMemo(() => {
     const all = plannerPreviewActive
       ? [...plannerPreviewSessions]
-      : [...registeredSessions, ...globalTrackSessions, ...previewSessions];
+      : [...registeredSessions, ...globalTrackSessions, ...previewSessions, ...dayExplorerSessions];
     const seen = new Set();
     const output = [];
 
@@ -680,6 +911,8 @@ function AppBody() {
             ...normalized,
             Staff: globalOverride.Staff ?? normalized.Staff,
             Time: globalOverride.Time ?? normalized.Time,
+            DayWeekName: globalOverride.DayWeekName ?? normalized.DayWeekName,
+            DayWeek: globalOverride.DayWeek ?? normalized.DayWeek,
           };
           isModified = true;
           modifiedReason = "Synced from modified track";
@@ -714,6 +947,7 @@ function AppBody() {
     plannerPreviewSessions,
     globalTrackSessions,
     previewSessions,
+    dayExplorerSessions,
     globalOverridesMap,
     shouldSyncWithModified,
     activeTrackOption,
@@ -721,8 +955,11 @@ function AppBody() {
   ]);
   const registeredCount = registrations.length;
   const activePreviewCount =
-    Object.values(preview).filter((p) => p?.lectures || p?.subgroups).length + (globalTrack ? 1 : 0);
-  const hasAllPreviewMode = Object.values(preview).some((p) => p?.lectures || p?.subgroups);
+    Object.values(preview).filter((p) => p?.lectures || p?.subgroups).length +
+    (globalTrack ? 1 : 0) +
+    (dayExplorer !== "all" ? 1 : 0);
+  const hasAllPreviewMode =
+    Object.values(preview).some((p) => p?.lectures || p?.subgroups) || dayExplorer !== "all";
   const scoreEnabled = !hasAllPreviewMode && courses.length > 0;
   const hasBuiltSchedule = tableSessions.length > 0 || Boolean(globalTrackPick);
 
@@ -741,6 +978,153 @@ function AppBody() {
     if (!globalTrackPick) return "";
     return trackById.get(globalTrackPick)?.label || "";
   }, [globalTrack, globalTrackPick, trackById]);
+  const visibleDays = useMemo(() => (dayExplorer === "all" ? DAYS : [dayExplorer]), [dayExplorer]);
+  const daySectionRows = useMemo(() => {
+    const tracks = baseTrackOptions.map((track) => {
+      const firstParsed = parseSectionGroupName(track.sections[0] || "");
+      return {
+        id: track.id,
+        label: track.label,
+        prefix: track.prefix,
+        sections: track.sections,
+        sectionSet: new Set(track.sections.map((s) => String(s).trim().toUpperCase())),
+        sortPrefix: firstParsed?.prefix || track.prefix || "",
+        sortNumber: firstParsed?.number ?? 999,
+      };
+    });
+    tracks.sort((a, b) => {
+      const byPrefix = a.sortPrefix.localeCompare(b.sortPrefix);
+      if (byPrefix !== 0) return byPrefix;
+      if (a.sortNumber !== b.sortNumber) return a.sortNumber - b.sortNumber;
+      return a.label.localeCompare(b.label, undefined, { numeric: true });
+    });
+    return tracks;
+  }, [baseTrackOptions]);
+  const dayExplorerSessionsOnly = useMemo(
+    () => (dayExplorer === "all" ? [] : tableSessions.filter((s) => normalizeDay(s) === dayExplorer)),
+    [tableSessions, dayExplorer]
+  );
+  const dayExplorerSessionMap = useMemo(() => {
+    const map = new Map(daySectionRows.map((row) => [row.id, []]));
+    if (dayExplorer === "all") return map;
+
+    for (const session of dayExplorerSessionsOnly) {
+      if (isSubgroup(session.Type)) {
+        const g = String(session.GroupName || "").trim().toUpperCase();
+        for (const row of daySectionRows) {
+          if (row.sectionSet.has(g)) {
+            map.get(row.id).push(session);
+          }
+        }
+        continue;
+      }
+
+      const lecturePrefix = String(session.GroupName || "").trim().toUpperCase();
+      for (const row of daySectionRows) {
+        if (String(row.prefix || "").toUpperCase() === lecturePrefix) {
+          map.get(row.id).push(session);
+        }
+      }
+    }
+
+    for (const row of daySectionRows) {
+      const list = map.get(row.id) || [];
+      const seenLecture = new Set();
+      const compacted = [];
+      for (const session of list) {
+        if (isLecture(session.Type)) {
+          const lectureKey = [
+            session.courseId || session.courseName,
+            session.Time,
+            String(session.GroupName || "").trim().toUpperCase(),
+            String(session.ClassRoomName || "").trim().toUpperCase(),
+            String(session.Staff || "").trim().toUpperCase(),
+          ].join("|");
+          if (seenLecture.has(lectureKey)) continue;
+          seenLecture.add(lectureKey);
+        }
+        compacted.push(session);
+      }
+      map.set(row.id, compacted);
+    }
+
+    return map;
+  }, [daySectionRows, dayExplorer, dayExplorerSessionsOnly]);
+  const dayExplorerTableModel = useMemo(() => {
+    if (dayExplorer === "all") return null;
+
+    const rows = daySectionRows;
+    const rowCount = rows.length;
+    const colCount = currentTimeSlots.length;
+    const occupancy = Array.from({ length: rowCount }, () => Array.from({ length: colCount }, () => null));
+
+    for (let r = 0; r < rowCount; r += 1) {
+      const sessions = dayExplorerSessionMap.get(rows[r].id) || [];
+      for (const session of sessions) {
+        const range = slotRange(session, currentTimeSlots);
+        if (!range) continue;
+        const signature = sessionVerticalMergeSignature(session);
+        for (let c = range.start; c < range.end; c += 1) {
+          occupancy[r][c] = {
+            session,
+            signature,
+            colStart: range.start,
+            colEnd: range.end,
+          };
+        }
+      }
+    }
+
+    const starts = new Map();
+    const covered = new Set();
+    const keyOf = (r, c) => `${r}:${c}`;
+
+    for (let r = 0; r < rowCount; r += 1) {
+      for (let c = 0; c < colCount; c += 1) {
+        const cell = occupancy[r][c];
+        if (!cell || c !== cell.colStart) continue;
+        const startKey = keyOf(r, c);
+        if (covered.has(startKey)) continue;
+
+        let rowEnd = r + 1;
+        while (rowEnd < rowCount) {
+          let canExtend = true;
+          for (let cc = cell.colStart; cc < cell.colEnd; cc += 1) {
+            const nextCell = occupancy[rowEnd][cc];
+            if (!nextCell) {
+              canExtend = false;
+              break;
+            }
+            if (
+              nextCell.signature !== cell.signature ||
+              nextCell.colStart !== cell.colStart ||
+              nextCell.colEnd !== cell.colEnd
+            ) {
+              canExtend = false;
+              break;
+            }
+          }
+          if (!canExtend) break;
+          rowEnd += 1;
+        }
+
+        for (let rr = r; rr < rowEnd; rr += 1) {
+          for (let cc = cell.colStart; cc < cell.colEnd; cc += 1) {
+            covered.add(keyOf(rr, cc));
+          }
+        }
+
+        starts.set(startKey, {
+          session: cell.session,
+          colSpan: cell.colEnd - cell.colStart,
+          rowSpan: rowEnd - r,
+          colStart: cell.colStart,
+        });
+      }
+    }
+
+    return { rows, starts, covered, colCount };
+  }, [dayExplorer, daySectionRows, currentTimeSlots, dayExplorerSessionMap]);
 
   function displayGroupNameInCard(session) {
     if (!isSubgroup(session?.Type)) return session?.GroupName;
@@ -749,13 +1133,13 @@ function AppBody() {
     return pairedSectionLabel(session?.GroupName);
   }
 
-  const slotStartByIndex = useMemo(() => TIME_SLOTS.map((slot) => slotStartMinutes(slot)), []);
+  const slotStartByIndex = useMemo(() => currentTimeSlots.map((slot) => slotStartMinutes(slot)), [currentTimeSlots]);
 
   const freeTimeByDay = useMemo(() => {
     const occupied = new Map(DAYS.map((d) => [d, new Set()]));
     for (const s of tableSessions) {
       const day = normalizeDay(s);
-      const range = slotRange(s);
+      const range = slotRange(s, currentTimeSlots);
       if (!occupied.has(day) || !range) continue;
       for (let i = range.start; i < range.end; i += 1) occupied.get(day).add(i);
     }
@@ -766,13 +1150,13 @@ function AppBody() {
       if (!used.size) continue;
       const blocks = [];
       let start = null;
-      for (let i = 0; i < TIME_SLOTS.length; i += 1) {
+      for (let i = 0; i < currentTimeSlots.length; i += 1) {
         const busy = used.has(i);
         if (!busy && start == null) start = i;
-        if ((busy || i === TIME_SLOTS.length - 1) && start != null) {
+        if ((busy || i === currentTimeSlots.length - 1) && start != null) {
           const endIndex = busy ? i - 1 : i;
-          const startText = TIME_SLOTS[start].split("-")[0].trim();
-          const endText = TIME_SLOTS[endIndex].split("-")[1].trim();
+          const startText = currentTimeSlots[start].split("-")[0].trim();
+          const endText = currentTimeSlots[endIndex].split("-")[1].trim();
           blocks.push(formatSessionTimeLabel(`${startText} - ${endText}`, "12h"));
           start = null;
         }
@@ -780,7 +1164,7 @@ function AppBody() {
       result.set(day, blocks);
     }
     return result;
-  }, [tableSessions]);
+  }, [tableSessions, currentTimeSlots]);
 
   const recommendationItems = useMemo(() => {
     if (!tableSessions.length) return [];
@@ -788,7 +1172,7 @@ function AppBody() {
     const occupied = new Map(DAYS.map((d) => [d, new Set()]));
     for (const s of tableSessions) {
       const day = normalizeDay(s);
-      const range = slotRange(s);
+      const range = slotRange(s, currentTimeSlots);
       if (!occupied.has(day) || !range) continue;
       for (let i = range.start; i < range.end; i += 1) occupied.get(day).add(i);
     }
@@ -800,10 +1184,10 @@ function AppBody() {
       const ranges = [];
       let start = null;
 
-      for (let i = 0; i < TIME_SLOTS.length; i += 1) {
+      for (let i = 0; i < currentTimeSlots.length; i += 1) {
         const busy = used.has(i);
         if (!busy && start == null) start = i;
-        if ((busy || i === TIME_SLOTS.length - 1) && start != null) {
+        if ((busy || i === currentTimeSlots.length - 1) && start != null) {
           const end = busy ? i : i + 1;
           ranges.push({ start, end });
           start = null;
@@ -824,7 +1208,7 @@ function AppBody() {
         const freeRanges = freeRangesByDay.get(day) || [];
         if (!freeRanges.length) continue;
 
-        const range = slotRange(session);
+        const range = slotRange(session, currentTimeSlots);
         if (!range) continue;
 
         const key = `${day}|${session.Time}|${course.id}|${session.GroupId}`;
@@ -854,7 +1238,7 @@ function AppBody() {
     });
 
     return out.slice(0, 30);
-  }, [tableSessions, courses]);
+  }, [tableSessions, courses, currentTimeSlots]);
 
   const filteredRecommendationItems = useMemo(() => {
     const search = recommendSearch.trim().toLowerCase();
@@ -881,7 +1265,7 @@ function AppBody() {
     const lateSessions = new Set();
     for (const s of sessions) {
       const day = normalizeDay(s);
-      const range = slotRange(s);
+      const range = slotRange(s, currentTimeSlots);
       if (!occupied.has(day) || !range) continue;
       for (let i = range.start; i < range.end; i += 1) occupied.get(day).add(i);
       const startMin = slotStartByIndex[range.start];
@@ -906,7 +1290,7 @@ function AppBody() {
     }
 
     const after4Sessions = lateSessions.size;
-    const conflictCount = countSessionConflicts(sessions);
+    const conflictCount = countSessionConflicts(sessions, currentTimeSlots);
     const scoreDays = Math.max(0, 100 - Math.max(0, activeDays - 1) * 18);
     const scoreGaps = Math.max(0, 100 - gapSlots * 10);
     const scoreLate = Math.max(0, 100 - after4Sessions * 24);
@@ -926,7 +1310,7 @@ function AppBody() {
     };
   }
 
-  const currentScheduleScore = useMemo(() => evaluateSchedule(tableSessions), [tableSessions]);
+  const currentScheduleScore = useMemo(() => evaluateSchedule(tableSessions), [tableSessions, currentTimeSlots]);
 
   const allTrackCandidates = useMemo(() => {
     if (!scoreEnabled) return [];
@@ -967,7 +1351,7 @@ function AppBody() {
     }
 
     return candidates;
-  }, [scoreEnabled, baseTrackOptions, courses, registeredSessions]);
+  }, [scoreEnabled, baseTrackOptions, courses, registeredSessions, currentTimeSlots]);
 
   const rankedTrackCandidates = useMemo(() => {
     const sorted = [...allTrackCandidates];
@@ -1158,7 +1542,7 @@ function AppBody() {
 
     const others = registrations.filter((r) => r.courseId !== selectedCourse.id);
     const existing = flattenSessions(coursesById, others);
-    const conflict = findConflict(candidate, existing);
+    const conflict = findConflict(candidate, existing, currentTimeSlots);
 
     if (conflict) {
       showNotice(
@@ -1182,11 +1566,69 @@ function AppBody() {
     showNotice("success", "Saved", `${selectedCourse.name} registration updated successfully.`);
   }
 
+  function saveCurrentRegistrationPreset() {
+    if (!registrations.length) {
+      showNotice("error", "Register Preset", "Register at least one course before saving a preset.");
+      return;
+    }
+
+    const rawName = window.prompt("Preset name");
+    if (rawName == null) return;
+    const name = rawName.trim();
+    if (!name) {
+      showNotice("error", "Register Preset", "Preset name is required.");
+      return;
+    }
+
+    const id = `register-${Date.now()}`;
+    const nextPreset = {
+      id,
+      name,
+      selections: registrations.map((r) => ({
+        courseId: r.courseId,
+        selectedGroupIds: [...r.selectedGroupIds],
+      })),
+    };
+    setRegisterPresets((prev) => [...prev.filter((item) => item.name !== name), nextPreset]);
+    setSelectedRegisterPresetId(id);
+    showNotice(
+      "success",
+      "Register Preset",
+      `${name} saved with ${nextPreset.selections.length} registered course(s).`
+    );
+  }
+
+  function applyRegisterPreset(presetId) {
+    if (!presetId) {
+      setSelectedRegisterPresetId("");
+      return;
+    }
+    const preset = registerPresets.find((item) => item.id === presetId);
+    if (!preset) return;
+    setSelectedRegisterPresetId(preset.id);
+    setRegistrations(normalizeRegistrations(courses, preset.selections));
+    setPreview({});
+    setDayExplorer("all");
+    setGlobalTrack(null);
+    setGlobalTrackPick("");
+    showNotice("success", "Register Preset", `${preset.name} applied.`);
+  }
+
+  function deleteRegisterPreset(presetId) {
+    const preset = registerPresets.find((item) => item.id === presetId);
+    if (!preset) return;
+    setRegisterPresets((prev) => prev.filter((item) => item.id !== presetId));
+    if (selectedRegisterPresetId === presetId) setSelectedRegisterPresetId("");
+    showNotice("info", "Register Preset", `${preset.name} deleted.`);
+  }
+
   function clearAll() {
     setRegistrations([]);
     setPreview({});
+    setDayExplorer("all");
     setGlobalTrack(null);
     setGlobalTrackPick("");
+    setSelectedRegisterPresetId("");
     setDamagePlans([]);
     setShowPlannerModal(false);
     setPlannerModalTab("panel");
@@ -1194,9 +1636,14 @@ function AppBody() {
     setPlannerLocks({});
     setPlannerChangeFlags({});
     setTrackOverrides({});
+    setSharedTrackOverrides({});
     setCustomTrackOptions([]);
     setRemovedModifiedTrackIds([]);
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem(SHARED_TRACK_OVERRIDES_KEY);
+    localStorage.removeItem(CUSTOM_TRACK_OPTIONS_KEY);
+    localStorage.removeItem(TRACK_OVERRIDES_KEY);
+    localStorage.removeItem(REMOVED_MODIFIED_TRACK_IDS_KEY);
     showNotice("info", "Cleared", "All registrations and previews were cleared.");
   }
 
@@ -1217,6 +1664,7 @@ function AppBody() {
       return;
     }
     setGlobalTrack(null);
+    setDayExplorer("all");
     setPreview({
       [courseId]: {
         lectures: key === "lectures",
@@ -1246,7 +1694,16 @@ function AppBody() {
       selectedSubgroup: selectedTrack.label,
       isModified: Boolean(selectedTrack.isModified),
     });
+    setDayExplorer("all");
     setPreview({});
+  }
+
+  function applyDayExplorer(day) {
+    const next = String(day || "all");
+    setDayExplorer((prev) => (prev === next ? "all" : next));
+    setPreview({});
+    setGlobalTrack(null);
+    setGlobalTrackPick("");
   }
 
   function applyRankedTrack(name) {
@@ -1349,20 +1806,20 @@ function AppBody() {
     let nextTime = "";
     if (modifyStartIndex !== "") {
       const start = Number(modifyStartIndex);
-      if (Number.isNaN(start) || start < 0 || start >= TIME_SLOTS.length) {
+      if (Number.isNaN(start) || start < 0 || start >= currentTimeSlots.length) {
         showNotice("error", "Modify", "Invalid start slot.");
         return;
       }
 
-      const span = forcedSpanByType(selectedEditableSession.Type);
+      const span = slotRange(selectedEditableSession, currentTimeSlots)?.span || forcedSpanByType(selectedEditableSession.Type);
       const end = start + span - 1;
-      if (end >= TIME_SLOTS.length) {
+      if (end >= currentTimeSlots.length) {
         showNotice("error", "Modify", "Selected slot does not fit this session duration.");
         return;
       }
 
-      const startText = toSecondsHHMM(TIME_SLOTS[start].split("-")[0].trim());
-      const endText = toSecondsHHMM(TIME_SLOTS[end].split("-")[1].trim());
+      const startText = toSecondsHHMM(currentTimeSlots[start].split("-")[0].trim());
+      const endText = toSecondsHHMM(currentTimeSlots[end].split("-")[1].trim());
       nextTime = `${startText} - ${endText}`;
     }
 
@@ -1384,57 +1841,77 @@ function AppBody() {
       return;
     }
 
-    if (modifyMode === "new") {
-      const existingLabels = new Set(trackOptions.map((track) => track.label));
-      const label = buildAutoModifiedLabel(modifyTargetTrack.label, existingLabels);
-      const id = `custom-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
+    const mergePayloadToMap = (baseMap = {}) =>
+      Object.fromEntries(targetKeys.map((key) => [key, { ...(baseMap[key] || {}), ...payload }]));
 
-      setCustomTrackOptions((prev) => [
-        ...prev,
-        {
-          id,
-          label,
-          prefix: modifyTargetTrack.prefix,
-          sections: [...modifyTargetTrack.sections],
-          isModified: true,
-          mode: "modified",
-          baseTrackId: modifyTargetTrack.id,
-        },
-      ]);
+    let destinationTrackId = modifyTargetTrack.id;
+    let destinationTrackLabel = modifyTargetTrack.label;
+    let destinationTrackIsModified = Boolean(modifyTargetTrack.isModified);
+    let destinationBaseTrackId = modifyTargetTrack.baseTrackId || modifyTargetTrack.id;
 
-      setTrackOverrides((prev) => ({
-        ...prev,
-        [id]: {
-          ...(prev[modifyTargetTrack.id] || {}),
-          ...Object.fromEntries(targetKeys.map((key) => [key, payload])),
-        },
-      }));
+    const linkedModifiedTrack = trackOptions.find(
+      (track) => track.isModified && track.baseTrackId === modifyTargetTrack.id
+    );
+    const shouldAutoCreateModified = modifyMode === "new" || (!modifyTargetTrack.isModified && modifyMode === "regular");
 
-      setGlobalTrackPick(id);
-      setGlobalTrack({
-        trackId: id,
-        section: label,
-        prefix: modifyTargetTrack.prefix,
-        sections: [...modifyTargetTrack.sections],
-        selectedSubgroup: label,
-        isModified: true,
-      });
-      showNotice("success", "Modify", `${label} created successfully.`);
-    } else {
-      setTrackOverrides((prev) => ({
-        ...prev,
-        [modifyTargetTrack.id]: {
-          ...(prev[modifyTargetTrack.id] || {}),
-          ...Object.fromEntries(
-            targetKeys.map((key) => [key, { ...(prev[modifyTargetTrack.id]?.[key] || {}), ...payload }])
-          ),
-        },
-      }));
-      if (globalTrackPick === modifyTargetTrack.id) {
-        applyGlobalSectionTrack(modifyTargetTrack.id);
+    if (shouldAutoCreateModified) {
+      if (linkedModifiedTrack && modifyMode === "regular") {
+        destinationTrackId = linkedModifiedTrack.id;
+        destinationTrackLabel = linkedModifiedTrack.label;
+        destinationTrackIsModified = true;
+        destinationBaseTrackId = linkedModifiedTrack.baseTrackId || modifyTargetTrack.id;
+      } else {
+        const existingLabels = new Set(trackOptions.map((track) => track.label));
+        const preferredLabel = `${modifyTargetTrack.label} Modified`;
+        const label = existingLabels.has(preferredLabel)
+          ? buildAutoModifiedLabel(modifyTargetTrack.label, existingLabels)
+          : preferredLabel;
+        const id = `custom-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
+
+        setCustomTrackOptions((prev) => [
+          ...prev,
+          {
+            id,
+            label,
+            prefix: modifyTargetTrack.prefix,
+            sections: [...modifyTargetTrack.sections],
+            isModified: true,
+            mode: "modified",
+            baseTrackId: modifyTargetTrack.id,
+          },
+        ]);
+        destinationTrackId = id;
+        destinationTrackLabel = label;
+        destinationTrackIsModified = true;
+        destinationBaseTrackId = modifyTargetTrack.id;
       }
-      showNotice("success", "Modify", `${modifyTargetTrack.label} updated successfully.`);
     }
+
+    setTrackOverrides((prev) => ({
+      ...prev,
+      [destinationTrackId]: {
+        ...(prev[destinationTrackId] || {}),
+        ...mergePayloadToMap(prev[destinationTrackId] || {}),
+      },
+    }));
+
+    setSharedTrackOverrides((prev) => ({
+      ...prev,
+      ...mergePayloadToMap(prev),
+    }));
+
+    setModifyTrackId(destinationTrackId);
+    setGlobalTrackPick(destinationTrackId);
+    setGlobalTrack({
+      trackId: destinationTrackId,
+      section: destinationTrackLabel,
+      prefix: modifyTargetTrack.prefix,
+      sections: [...modifyTargetTrack.sections],
+      selectedSubgroup: destinationTrackLabel,
+      isModified: destinationTrackIsModified,
+      baseTrackId: destinationBaseTrackId,
+    });
+    showNotice("success", "Modify", `${destinationTrackLabel} updated successfully.`);
 
     setModifySessionKey("");
     setModifyStaff("");
@@ -1444,12 +1921,20 @@ function AppBody() {
 
   function revertTrackChanges() {
     if (!modifyTargetTrack) return;
+    const keysToRemove = Object.keys(modifyTrackOverrides || {});
 
     setTrackOverrides((prev) => {
       const next = { ...prev };
       delete next[modifyTargetTrack.id];
       return next;
     });
+    if (keysToRemove.length) {
+      setSharedTrackOverrides((prev) => {
+        const next = { ...prev };
+        for (const key of keysToRemove) delete next[key];
+        return next;
+      });
+    }
 
     if (modifyTargetTrack.id === PRESET_C1_MODIFIED_ID && modifyTargetTrack.baseTrackId) {
       setGlobalTrackPick(modifyTargetTrack.baseTrackId);
@@ -1461,24 +1946,33 @@ function AppBody() {
     showNotice("info", "Reverted", `${modifyTargetTrack.label} changes were reverted.`);
   }
 
-  function removeModifiedTrack() {
-    if (!modifyTargetTrack?.isModified) return;
+  function removeModifiedTrackById(trackId) {
+    const targetTrack = trackById.get(trackId);
+    if (!targetTrack?.isModified) return;
+    const keysToRemove = Object.keys(trackOverrides[targetTrack.id] || {});
+    const fallbackTrackId = targetTrack.baseTrackId || "";
 
-    const fallbackTrackId = modifyTargetTrack.baseTrackId || "";
     setTrackOverrides((prev) => {
       const next = { ...prev };
-      delete next[modifyTargetTrack.id];
+      delete next[targetTrack.id];
       return next;
     });
+    if (keysToRemove.length) {
+      setSharedTrackOverrides((prev) => {
+        const next = { ...prev };
+        for (const key of keysToRemove) delete next[key];
+        return next;
+      });
+    }
 
-    if (modifyTargetTrack.id.startsWith("custom-")) {
-      setCustomTrackOptions((prev) => prev.filter((track) => track.id !== modifyTargetTrack.id));
+    if (targetTrack.id.startsWith("custom-")) {
+      setCustomTrackOptions((prev) => prev.filter((track) => track.id !== targetTrack.id));
     }
     setRemovedModifiedTrackIds((prev) =>
-      prev.includes(modifyTargetTrack.id) ? prev : [...prev, modifyTargetTrack.id]
+      prev.includes(targetTrack.id) ? prev : [...prev, targetTrack.id]
     );
 
-    if (globalTrackPick === modifyTargetTrack.id) {
+    if (globalTrackPick === targetTrack.id) {
       setGlobalTrackPick(fallbackTrackId);
       applyGlobalSectionTrack(fallbackTrackId);
       if (!fallbackTrackId) {
@@ -1486,11 +1980,16 @@ function AppBody() {
       }
     }
 
-    if (modifyTrackId === modifyTargetTrack.id) {
+    if (modifyTrackId === targetTrack.id) {
       setModifyTrackId(fallbackTrackId);
     }
 
-    showNotice("info", "Removed", `${modifyTargetTrack.label} was removed.`);
+    showNotice("info", "Removed", `${targetTrack.label} was removed.`);
+  }
+
+  function removeModifiedTrack() {
+    if (!modifyTargetTrack?.isModified) return;
+    removeModifiedTrackById(modifyTargetTrack.id);
   }
 
   async function toggleFullscreen() {
@@ -1756,9 +2255,11 @@ function AppBody() {
                           </div>
                         )}
 
-                        <button className="btn" type="submit">
-                          Register Selection
-                        </button>
+                        <div className="register-actions">
+                          <button className="btn" type="submit">
+                            Register Selection
+                          </button>
+                        </div>
                       </form>
                     )}
                   </div>
@@ -1786,6 +2287,49 @@ function AppBody() {
                   {trackOptions.map((track) => (
                     <option key={track.id} value={track.id}>
                       {track.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="global-track">
+                <select
+                  value={selectedRegisterPresetId}
+                  onChange={(e) => applyRegisterPreset(e.target.value)}
+                  className="track-select"
+                >
+                  <option value="">Register Presets</option>
+                  {registerPresets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="mini"
+                  disabled={!selectedRegisterPresetId}
+                  onClick={() => deleteRegisterPreset(selectedRegisterPresetId)}
+                >
+                  Delete Preset
+                </button>
+                <button
+                  type="button"
+                  className="mini"
+                  disabled={!registrations.length}
+                  onClick={saveCurrentRegistrationPreset}
+                >
+                  Save All Reg
+                </button>
+              </div>
+              <div className="global-track">
+                <select
+                  value={timeProfile}
+                  onChange={(e) => setTimeProfile(e.target.value)}
+                  className="track-select"
+                >
+                  {Object.values(TIME_PROFILES).map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.label}
                     </option>
                   ))}
                 </select>
@@ -1832,6 +2376,55 @@ function AppBody() {
               </button>
             </div>
           </div>
+          <div className="day-filter-row">
+            {DAYS.map((day) => (
+              <button
+                key={`day-explorer-${day}`}
+                type="button"
+                className={`mini ${dayExplorer === day ? "on" : ""}`}
+                onClick={() => applyDayExplorer(day)}
+              >
+                {day}
+              </button>
+            ))}
+          </div>
+          <div className="saved-management">
+            <div className="saved-block">
+              <strong>Delete Modified Tables</strong>
+              {removableModifiedTracks.length > 0 ? (
+                <div className="saved-list">
+                  {removableModifiedTracks.map((track) => (
+                    <div key={`remove-track-${track.id}`} className="saved-item">
+                      <span>{track.label}</span>
+                      <button type="button" className="mini danger" onClick={() => removeModifiedTrackById(track.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted score-line">No modified tables to delete.</p>
+              )}
+            </div>
+
+            <div className="saved-block">
+              <strong>Delete Saved Presets</strong>
+              {registerPresets.length > 0 ? (
+                <div className="saved-list">
+                  {registerPresets.map((preset) => (
+                    <div key={`remove-preset-${preset.id}`} className="saved-item">
+                      <span>{preset.name}</span>
+                      <button type="button" className="mini danger" onClick={() => deleteRegisterPreset(preset.id)}>
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted score-line">No saved presets to delete.</p>
+              )}
+            </div>
+          </div>
           {showModifyPanel && (
             <div className="modify-panel">
               <div className="modify-row">
@@ -1862,13 +2455,15 @@ function AppBody() {
                 >
                   Modify Same Track
                 </button>
-                <button
-                  type="button"
-                  className={`mini ${modifyMode === "new" ? "on" : ""}`}
-                  onClick={() => setModifyMode("new")}
-                >
-                  Create Modified Copy
-                </button>
+                {!selectedRegisterPresetId && (
+                  <button
+                    type="button"
+                    className={`mini ${modifyMode === "new" ? "on" : ""}`}
+                    onClick={() => setModifyMode("new")}
+                  >
+                    Create Modified Copy
+                  </button>
+                )}
               </div>
 
               <div className="modify-row">
@@ -1924,9 +2519,11 @@ function AppBody() {
                     onChange={(e) => setModifyStartIndex(e.target.value)}
                   >
                     <option value="">Keep current</option>
-                    {TIME_SLOTS.map((slot, idx) => {
-                      const span = forcedSpanByType(selectedEditableSession?.Type || "Group");
-                      if (idx + span > TIME_SLOTS.length) return null;
+                    {currentTimeSlots.map((slot, idx) => {
+                      const span =
+                        slotRange(selectedEditableSession, currentTimeSlots)?.span ||
+                        forcedSpanByType(selectedEditableSession?.Type || "Group");
+                      if (idx + span > currentTimeSlots.length) return null;
                       return (
                         <option key={`modify-slot-${slot}`} value={idx}>
                           {formatSlotLabel(slot, timeFormat)}
@@ -1955,65 +2552,109 @@ function AppBody() {
             </div>
           )}
           <h1 className="print-export-title">{printTitle}</h1>
-          <div className="timetable">
+          <div
+            className={`timetable ${dayExplorer !== "all" ? "day-sections-mode" : ""}`}
+            style={{ "--slots-count": currentTimeSlots.length }}
+          >
             <div className="time-header">
-              <div className="corner">Day / Time</div>
-              {TIME_SLOTS.map((slot) => (
+              <div className="corner">{dayExplorer === "all" ? "Day / Time" : "Section / Time"}</div>
+              {currentTimeSlots.map((slot) => (
                 <div className="time-cell" key={slot}>
                   {formatSlotLabel(slot, timeFormat)}
                 </div>
               ))}
             </div>
 
-            {DAYS.map((day) => (
-              <div className="day-row" key={day}>
-                <div className="day-label">{day}</div>
-                <div className="day-grid">
-                  {TIME_SLOTS.map((slot) => (
-                    <div className="slot-cell" key={`${day}-${slot}`} />
-                  ))}
-                  {tableSessions
-                    .filter((s) => normalizeDay(s) === day)
-                    .map((s, idx) => {
-                      const range = slotRange(s);
-                      if (!range) return null;
+            {dayExplorer === "all" &&
+              visibleDays.map((day) => (
+                <div className="day-row" key={day}>
+                  <div className="day-label">{day}</div>
+                  <div className="day-grid">
+                    {currentTimeSlots.map((slot) => (
+                      <div className="slot-cell" key={`${day}-${slot}`} />
+                    ))}
+                    {tableSessions
+                      .filter((s) => normalizeDay(s) === day)
+                      .map((s, idx) => {
+                        const range = slotRange(s, currentTimeSlots);
+                        if (!range) return null;
 
-                      return (
-                        <article
-                          key={`${day}-${s.courseName}-${s.GroupId}-${idx}-${s.Time}`}
-                          className={`lesson ${blockKindByType(s.Type)} ${
-                            s.source === "preview" || s.source === "planner-preview" ? "preview" : ""
-                          } ${
-                            s.source === "track" ? "track" : ""
-                          } ${s.isModified ? "modified" : ""} ${
-                            globalTrack?.isModified && s.source === "track" ? "modified-track" : ""
-                          }`}
-                          style={{ gridColumn: `${range.start + 1} / span ${forcedSpanByType(s.Type)}` }}
-                          title={`${s.courseName} | ${displayGroupNameInCard(s)} | ${s.Time}${
-                            s.isModified ? ` | ${s.modifiedReason || "Modified"}` : ""
-                          }`}
-                        >
-                          <div className="lesson-content">
-                            {s.isModified && <div className="modified-tag">Modified</div>}
-                            <div>
-                              <strong>Course:</strong> {s.courseName}
+                        return (
+                          <article
+                            key={`${day}-${s.courseName}-${s.GroupId}-${idx}-${s.Time}`}
+                            className={`lesson ${blockKindByType(s.Type)} ${
+                              s.source === "preview" || s.source === "planner-preview" ? "preview" : ""
+                            } ${
+                              s.source === "track" ? "track" : ""
+                            } ${s.isModified ? "modified" : ""} ${
+                              globalTrack?.isModified && s.source === "track" ? "modified-track" : ""
+                            }`}
+                            style={{ gridColumn: `${range.start + 1} / span ${range.span}` }}
+                            title={`${s.courseName} | ${displayGroupNameInCard(s)} | ${s.Time}${
+                              s.isModified ? ` | ${s.modifiedReason || "Modified"}` : ""
+                            }`}
+                          >
+                            <div className="lesson-content">
+                              {s.isModified && <div className="modified-tag">Modified</div>}
+                              <div>
+                                <strong>Course:</strong> {s.courseName}
+                              </div>
+                              <div>
+                                <strong>{groupLabelByType(s.Type)}:</strong> {displayGroupNameInCard(s)}
+                              </div>
+                              <div>
+                                <strong>Hall:</strong> {s.ClassRoomName || "N/A"}
+                              </div>
+                              <div>
+                                <strong>Staff:</strong> {s.Staff || "N/A"}
+                              </div>
                             </div>
-                            <div>
-                              <strong>{groupLabelByType(s.Type)}:</strong> {displayGroupNameInCard(s)}
-                            </div>
-                            <div>
-                              <strong>Hall:</strong> {s.ClassRoomName || "N/A"}
-                            </div>
-                            <div>
-                              <strong>Staff:</strong> {s.Staff || "N/A"}
-                            </div>
-                          </div>
-                        </article>
-                      );
-                    })}
+                          </article>
+                        );
+                      })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+
+            {dayExplorer !== "all" && dayExplorerTableModel && (
+              <table className="sections-day-table">
+                <tbody>
+                  {dayExplorerTableModel.rows.map((row, r) => (
+                    <tr key={`section-row-${row.id}`}>
+                      <th scope="row" className="sections-day-label">
+                        {row.label}
+                      </th>
+                      {Array.from({ length: dayExplorerTableModel.colCount }).map((_, c) => {
+                        const cellKey = `${r}:${c}`;
+                        const block = dayExplorerTableModel.starts.get(cellKey);
+                        if (block) {
+                          const s = block.session;
+                          return (
+                            <td
+                              key={`block-${row.id}-${c}`}
+                              rowSpan={block.rowSpan}
+                              colSpan={block.colSpan}
+                              className={`sections-day-lesson ${blockKindByType(s.Type)} ${
+                                s.isModified ? "modified" : ""
+                              } ${isLecture(s.Type) && block.rowSpan > 1 ? "vertical-merged" : ""}`}
+                              title={`${s.courseName} | ${displayGroupNameInCard(s)} | ${s.Time}`}
+                            >
+                              <div className="sections-day-lesson-content">
+                                <strong>{s.courseName}</strong>
+                                <span>{displayGroupNameInCard(s)}</span>
+                                <span>{s.ClassRoomName || "N/A"}</span>
+                              </div>
+                            </td>
+                          );
+                        }
+                        if (dayExplorerTableModel.covered.has(cellKey)) return null;
+                        return <td key={`empty-${row.id}-${c}`} className="sections-day-empty" />;
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
 
           <div className="insights-panel">
@@ -2114,7 +2755,7 @@ function AppBody() {
 
                 {!scoreEnabled && (
                   <p className="muted score-line">
-                    Analytics is disabled while All Lectures/All Sections preview is active.
+                    Analytics is disabled while preview mode is active (All Lectures, All Sections, or Day View).
                   </p>
                 )}
 
@@ -2418,3 +3059,4 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+

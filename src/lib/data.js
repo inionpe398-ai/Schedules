@@ -10,6 +10,7 @@ const COURSE_NAME_MAP = {
   pyschological: "Psychological and Behavioral Issues in Dental Practice",
   psychological: "Psychological and Behavioral Issues in Dental Practice",
   "oral public": "Oral Public Health and Preventive Dentistry I",
+  economics: "Introduction to Economics",
 };
 
 function formatName(fileName) {

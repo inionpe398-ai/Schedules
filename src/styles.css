@@ -30,6 +30,7 @@
 
   --day-col: 124px;
   --slot-width: 134px;
+  --slots-count: 12;
   --row-height: 132px;
 
   --card-gap-y: 6px;
@@ -353,6 +354,12 @@ textarea {
   gap: 12px;
 }
 
+.register-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .reg-form h3 {
   margin: 0;
   font-size: 0.95rem;
@@ -455,6 +462,56 @@ textarea {
   margin-bottom: 8px;
 }
 
+.day-filter-row {
+  margin-bottom: 8px;
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.saved-management {
+  margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.saved-block {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 8px;
+  display: grid;
+  gap: 6px;
+}
+
+.saved-block strong {
+  font-size: 0.82rem;
+  color: #1e3a8a;
+}
+
+.saved-list {
+  display: grid;
+  gap: 6px;
+}
+
+.saved-item {
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.saved-item span {
+  font-size: 0.78rem;
+  color: #1e293b;
+  font-weight: 600;
+}
+
 .schedule-head h2 {
   margin: 0;
 }
@@ -520,9 +577,9 @@ textarea {
 .time-header,
 .day-row {
   width: max-content;
-  min-width: calc(var(--day-col) + (12 * var(--slot-width)));
+  min-width: calc(var(--day-col) + (var(--slot-width) * var(--slots-count)));
   display: grid;
-  grid-template-columns: var(--day-col) repeat(12, var(--slot-width));
+  grid-template-columns: var(--day-col) repeat(var(--slots-count), var(--slot-width));
 }
 
 .time-header {
@@ -562,9 +619,9 @@ textarea {
 }
 
 .day-grid {
-  grid-column: 2 / span 12;
+  grid-column: 2 / span var(--slots-count);
   display: grid;
-  grid-template-columns: repeat(12, var(--slot-width));
+  grid-template-columns: repeat(var(--slots-count), var(--slot-width));
   grid-template-rows: var(--row-height);
   height: var(--row-height);
   min-height: var(--row-height);
@@ -573,6 +630,117 @@ textarea {
   border-right: 1px solid var(--line);
   overflow: hidden;
   background: #fff;
+}
+
+.timetable.day-sections-mode .day-grid {
+  grid-template-rows: 78px;
+  height: 78px;
+  min-height: 78px;
+  max-height: 78px;
+}
+
+.timetable.day-sections-mode .lesson {
+  font-size: 0.67rem;
+  height: calc(78px - 12px);
+  max-height: calc(78px - 12px);
+  border-radius: 8px;
+}
+
+.timetable.day-sections-mode .day-label {
+  font-size: 0.82rem;
+  padding: 8px 6px;
+}
+
+.sections-day-table {
+  width: max-content;
+  min-width: calc(var(--day-col) + (var(--slot-width) * var(--slots-count)));
+  border-collapse: collapse;
+}
+
+.sections-day-table tr {
+  height: 78px;
+}
+
+.sections-day-label {
+  width: var(--day-col);
+  min-width: var(--day-col);
+  max-width: var(--day-col);
+  border: 1px solid var(--line);
+  background: #fbfdff;
+  color: #0f172a;
+  font-size: 0.8rem;
+  font-weight: 800;
+  text-align: center;
+  padding: 8px 6px;
+}
+
+.sections-day-empty,
+.sections-day-lesson {
+  width: var(--slot-width);
+  min-width: var(--slot-width);
+  border: 1px solid var(--line-grid);
+  vertical-align: top;
+}
+
+.sections-day-empty {
+  background: #fff;
+}
+
+.sections-day-lesson {
+  border-radius: 0;
+  padding: 4px;
+  font-size: 0.66rem;
+  line-height: 1.2;
+  color: #111;
+}
+
+.sections-day-lesson.group {
+  background: #7cd77c;
+}
+
+.sections-day-lesson.subgroup {
+  background: #fbd782;
+}
+
+.sections-day-lesson.modified {
+  border-style: dashed;
+  border-color: #0284c7;
+}
+
+.sections-day-lesson-content {
+  display: grid;
+  gap: 2px;
+}
+
+.sections-day-lesson.vertical-merged {
+  padding: 0;
+  overflow: hidden;
+}
+
+.sections-day-lesson.vertical-merged .sections-day-lesson-content {
+  height: 100%;
+  width: 100%;
+  display: grid;
+  align-items: center;
+  justify-content: center;
+  justify-items: center;
+  gap: 6px;
+  transform: rotate(-90deg);
+  transform-origin: center center;
+  white-space: normal;
+  text-align: center;
+  font-size: 0.72rem;
+  line-height: 1.2;
+  font-weight: 700;
+  max-width: 92%;
+}
+
+.sections-day-lesson.vertical-merged .sections-day-lesson-content strong {
+  font-weight: 800;
+}
+
+.sections-day-lesson.vertical-merged .sections-day-lesson-content span {
+  display: block;
 }
 
 .slot-cell {
@@ -1279,6 +1447,10 @@ textarea {
     grid-template-columns: 1fr;
   }
 
+  .saved-management {
+    grid-template-columns: 1fr;
+  }
+
   .time-format-toggle {
     width: 100%;
     justify-content: stretch;
@@ -1361,7 +1533,7 @@ textarea {
   .app.print-schedule-mode .day-row {
     width: 100% !important;
     min-width: 0 !important;
-    grid-template-columns: 86px repeat(12, 1fr) !important;
+    grid-template-columns: 86px repeat(var(--slots-count), 1fr) !important;
   }
 
   .app.print-schedule-mode .time-header {
@@ -1398,7 +1570,7 @@ textarea {
   }
 
   .app.print-schedule-mode .day-grid {
-    grid-template-columns: repeat(12, 1fr) !important;
+    grid-template-columns: repeat(var(--slots-count), 1fr) !important;
     border-right: 1px solid #94a3b8 !important;
     overflow: hidden !important;
   }
