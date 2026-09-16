@@ -1,0 +1,4 @@
+.env
+storage/*.sqlite
+storage/*.sqlite-shm
+storage/*.sqlite-wal

@@ -4,17 +4,28 @@
   "version": "2.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node --env-file-if-exists=.env server/index.js",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "cross-env NODE_ENV=production node --env-file-if-exists=.env server/index.js",
+    "migrate": "node scripts/migrate.js",
+    "typecheck": "node scripts/check-server.js",
+    "test": "node --test",
+    "cf:build": "npm run build",
+    "cf:dev": "wrangler dev --local",
+    "cf:deploy": "npm run cf:build && wrangler deploy",
+    "cf:d1:migrate": "wrangler d1 migrations apply dulms-schedule-data --remote"
   },
   "dependencies": {
+    "express": "^5.2.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.1.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "vite": "^5.4.14"
+    "@cloudflare/workers-types": "^5.20260915.1",
+    "cross-env": "^7.0.3",
+    "vite": "^5.4.14",
+    "wrangler": "^4.131.2"
   }
 }

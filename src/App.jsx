@@ -1,6 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { loadCourses } from "./lib/data";
 import {
+  extractLecturePrefix,
+  extractSectionPrefix,
+  lectureMatchesSection,
+  pairedSectionLabel,
+  parseSectionGroupName,
+} from "./lib/groupIdentity";
+import {
   DAYS,
   TIME_SLOTS,
   buildTimeSlots,
@@ -21,9 +28,6 @@ const SHARED_TRACK_OVERRIDES_KEY = "scheduleSharedTrackOverridesV1";
 const CUSTOM_TRACK_OPTIONS_KEY = "scheduleCustomTrackOptionsV1";
 const TRACK_OVERRIDES_KEY = "scheduleTrackOverridesV1";
 const REMOVED_MODIFIED_TRACK_IDS_KEY = "scheduleRemovedModifiedTrackIdsV1";
-const PRESET_C1_MODIFIED_ID = "preset-c1-modified";
-const FORCED_STAFF_NAME = "Islam Bendary";
-const FORCED_STAFF_GROUPS = new Set(["C1", "C2", "B5", "B6", "B1", "B2", "A5", "A6", "C3", "C4", "B7", "B8"]);
 const LATE_THRESHOLD_MINUTES = 16 * 60 + 15;
 const MAX_PLAN_SEARCH_LIMIT = 20000;
 const DAY_WEEK_BY_NAME = {
@@ -184,40 +188,6 @@ function summarize(g) {
   return g.sessions.map((s) => `${s.DayWeekName}: ${s.Time}`).join(" | ");
 }
 
-function extractSectionPrefix(groupName) {
-  const value = String(groupName || "").trim();
-  const match = value.match(/^([A-Za-z]+)/);
-  return match ? match[1].toUpperCase() : "";
-}
-
-function parseSectionGroupName(groupName) {
-  const value = String(groupName || "").trim();
-  const match = value.match(/^([A-Za-z]+)\s*(\d+)$/);
-  if (!match) return null;
-  return {
-    raw: value,
-    upper: value.toUpperCase(),
-    prefix: match[1].toUpperCase(),
-    number: Number(match[2]),
-  };
-}
-
-function pairedSectionGroupNames(groupName) {
-  const parsed = parseSectionGroupName(groupName);
-  if (!parsed) {
-    const single = String(groupName || "").trim().toUpperCase();
-    return single ? [single] : [];
-  }
-  const pairStart = parsed.number % 2 === 0 ? parsed.number - 1 : parsed.number;
-  return [`${parsed.prefix}${pairStart}`, `${parsed.prefix}${pairStart + 1}`];
-}
-
-function pairedSectionLabel(groupName) {
-  const pair = pairedSectionGroupNames(groupName);
-  if (!pair.length) return String(groupName || "").trim();
-  return pair.join("/");
-}
-
 function buildAutoModifiedLabel(baseLabel, existingLabels) {
   const root = `${String(baseLabel || "").trim()} Modified`.trim();
   if (!existingLabels.has(root)) return root;
@@ -256,7 +226,7 @@ function buildMergedTrackOptions(subgroupNames) {
       const sections = [first, second].filter(Boolean);
       if (!sections.length) continue;
 
-      const label = sections.length === 2 ? `${prefix}${pairStart}/${prefix}${pairStart + 1}` : sections[0];
+      const label = `${prefix}${pairStart}/${prefix}${pairStart + 1}`;
       options.push({
         id: `regular-${label}`,
         label,
@@ -410,6 +380,9 @@ function AppBody() {
   const [selectedRegisterPresetId, setSelectedRegisterPresetId] = useState("");
   const [dayExplorer, setDayExplorer] = useState("all");
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [analyticsMode, setAnalyticsMode] = useState("regular");
+  const [irregularScheduleCandidates, setIrregularScheduleCandidates] = useState([]);
+  const [isGeneratingIrregular, setIsGeneratingIrregular] = useState(false);
   const [rankingCriterion, setRankingCriterion] = useState("balanced");
   const [recommendSearch, setRecommendSearch] = useState("");
   const [recommendTypeFilter, setRecommendTypeFilter] = useState("all");
@@ -439,6 +412,7 @@ function AppBody() {
     return saved === "12h" ? "12h" : "24h";
   });
   const scheduleRef = useRef(null);
+  const allPdfAutoStartedRef = useRef(false);
 
   const coursesById = useMemo(() => new Map(courses.map((c) => [c.id, c])), [courses]);
   const currentTimeSlots = useMemo(() => {
@@ -506,7 +480,6 @@ function AppBody() {
           rawRemovedTrackIds = [];
         }
         const removedTrackIds = sanitizeRemovedModifiedTrackIds(rawRemovedTrackIds);
-        if (!removedTrackIds.includes(PRESET_C1_MODIFIED_ID)) removedTrackIds.push(PRESET_C1_MODIFIED_ID);
         setRemovedModifiedTrackIds(removedTrackIds);
         setIsHydrated(true);
       })
@@ -619,7 +592,10 @@ function AppBody() {
           continue;
         }
 
-        for (const section of sectionChoices) {
+        const matchedSections = sectionChoices.filter((section) => lectureMatchesSection(lecture.name, section.name));
+        // If DULMS renamed groups in a way that carries no shared prefix, keep
+        // every explicit lecture/section choice usable instead of hiding it.
+        for (const section of matchedSections.length ? matchedSections : sectionChoices) {
           const ids = [lecture.id, section.id];
           combos.push({
             key: ids.join("-"),
@@ -719,11 +695,7 @@ function AppBody() {
     return out;
   }, [courses, dayExplorer]);
 
-  const applyStaffPreset = (session) => {
-    const sectionName = String(session.GroupName || "").trim().toUpperCase();
-    if (!FORCED_STAFF_GROUPS.has(sectionName)) return session;
-    return { ...session, Staff: FORCED_STAFF_NAME };
-  };
+  const applyStaffPreset = (session) => session;
 
   const subgroupNames = useMemo(() => {
     const names = new Set();
@@ -740,26 +712,19 @@ function AppBody() {
 
   const baseTrackOptions = useMemo(() => buildMergedTrackOptions(subgroupNames), [subgroupNames]);
 
-  const presetC1ModifiedTrack = useMemo(() => {
-    const hasC1 = subgroupNames.some((name) => String(name).toUpperCase() === "C1");
-    if (!hasC1) return null;
-    return {
-      id: PRESET_C1_MODIFIED_ID,
-      label: "C1/C2 Modified",
-      prefix: "C",
-      sections: ["C1", "C2"],
-      isModified: true,
-      mode: "modified",
-      baseTrackId: "regular-C1/C2",
-    };
-  }, [subgroupNames]);
-
   const trackOptions = useMemo(() => {
     const out = [...baseTrackOptions];
-    if (presetC1ModifiedTrack) out.push(presetC1ModifiedTrack);
     out.push(...customTrackOptions);
     return out.filter((track) => !removedModifiedTrackIds.includes(track.id));
-  }, [baseTrackOptions, presetC1ModifiedTrack, customTrackOptions, removedModifiedTrackIds]);
+  }, [baseTrackOptions, customTrackOptions, removedModifiedTrackIds]);
+
+  useEffect(() => {
+    const shouldAutoExport = new URLSearchParams(window.location.search).get("export") === "all-pdf";
+    if (!shouldAutoExport || !trackOptions.length || allPdfAutoStartedRef.current) return;
+    allPdfAutoStartedRef.current = true;
+    const timer = setTimeout(() => downloadAllLevelPdf(), 250);
+    return () => clearTimeout(timer);
+  }, [trackOptions]);
 
   const trackById = useMemo(() => new Map(trackOptions.map((track) => [track.id, track])), [trackOptions]);
   const removableModifiedTracks = useMemo(() => trackOptions.filter((track) => track.isModified), [trackOptions]);
@@ -768,41 +733,10 @@ function AppBody() {
     () => (activeTrackOption ? trackOverrides[activeTrackOption.id] || {} : {}),
     [activeTrackOption, trackOverrides]
   );
-  const globalOverridesMap = useMemo(() => {
-    const merged = { ...(sharedTrackOverrides || {}) };
-    for (const map of Object.values(trackOverrides || {})) {
-      if (!map || typeof map !== "object") continue;
-      Object.assign(merged, map);
-    }
-    return merged;
-  }, [trackOverrides, sharedTrackOverrides]);
-  const shouldSyncWithModified = useMemo(
-    () => Boolean(activeTrackOption && (activeTrackOption.isModified || Object.keys(activeTrackOverrideMap).length)),
-    [activeTrackOption, activeTrackOverrideMap]
-  );
-
-  function isPresetC1ModifiedTrack(track) {
-    if (!track) return false;
-    return track.id === PRESET_C1_MODIFIED_ID || track.baseTrackId === PRESET_C1_MODIFIED_ID;
-  }
-
   function applyTrackSpecificAdjustments(rawSession, courseId, track, overrideMap = {}) {
     let session = applyStaffPreset(rawSession);
     let isModified = false;
     let modifiedReason = "";
-
-    const groupUpper = String(session.GroupName || "").trim().toUpperCase();
-    const c1Pair = new Set(pairedSectionGroupNames("C1"));
-    if (
-      isPresetC1ModifiedTrack(track) &&
-      String(courseId || "").toLowerCase() === "operative" &&
-      c1Pair.has(groupUpper) &&
-      String(session.Time || "").includes("12:30")
-    ) {
-      session = { ...session, Time: "08:45:00 - 10:15:00" };
-      isModified = true;
-      modifiedReason = "Time changed for C1 Modified";
-    }
 
     const key = sessionKeyForTrack(courseId, rawSession);
     const override = overrideMap[key];
@@ -845,16 +779,13 @@ function AppBody() {
     const sectionSet = new Set((globalTrack.sections || []).map((s) => String(s).trim().toUpperCase()));
     const prefixUpper = globalTrack.prefix.toUpperCase();
     const trackId = globalTrack.trackId;
-    const trackOverrideMap = {
-      ...globalOverridesMap,
-      ...(trackOverrides[trackId] || {}),
-    };
+    const trackOverrideMap = trackOverrides[trackId] || {};
     const out = [];
 
     for (const course of courses) {
       for (const raw of course.sessions) {
         const gName = String(raw.GroupName || "").trim().toUpperCase();
-        const matchesLecture = isLecture(raw.Type) && gName === prefixUpper;
+        const matchesLecture = isLecture(raw.Type) && extractLecturePrefix(gName) === prefixUpper;
         const matchesSubgroup = isSubgroup(raw.Type) && sectionSet.has(gName);
         if (!matchesLecture && !matchesSubgroup) continue;
 
@@ -874,7 +805,7 @@ function AppBody() {
     }
 
     return out;
-  }, [globalTrack, courses, trackOverrides, trackById, globalOverridesMap]);
+  }, [globalTrack, courses, trackOverrides, trackById]);
 
   const plannerPreviewPlan = useMemo(
     () => damagePlans.find((plan) => plan.id === plannerPreviewPlanId) || null,
@@ -899,39 +830,9 @@ function AppBody() {
     const output = [];
 
     for (const s of all) {
-      let normalized = applyStaffPreset(s);
+      let normalized = s;
       let isModified = Boolean(s.isModified);
       let modifiedReason = s.modifiedReason || "";
-
-      if (s.source !== "track" && s.source !== "planner-preview") {
-        const globalKey = sessionKeyForTrack(normalized.courseId || "", normalized);
-        const globalOverride = globalOverridesMap[globalKey];
-        if (globalOverride) {
-          normalized = {
-            ...normalized,
-            Staff: globalOverride.Staff ?? normalized.Staff,
-            Time: globalOverride.Time ?? normalized.Time,
-            DayWeekName: globalOverride.DayWeekName ?? normalized.DayWeekName,
-            DayWeek: globalOverride.DayWeek ?? normalized.DayWeek,
-          };
-          isModified = true;
-          modifiedReason = "Synced from modified track";
-        }
-      }
-
-      if (shouldSyncWithModified && s.source !== "track" && s.source !== "planner-preview") {
-        const adjusted = applyTrackSpecificAdjustments(
-          normalized,
-          normalized.courseId || "",
-          activeTrackOption,
-          activeTrackOverrideMap
-        );
-        normalized = adjusted.session;
-        if (adjusted.isModified) {
-          isModified = true;
-          modifiedReason = adjusted.modifiedReason;
-        }
-      }
 
       normalized = { ...normalized, isModified, modifiedReason };
       const key = `${normalized.courseId || normalized.courseName}|${normalized.GroupId}|${normalized.DayWeek}|${normalized.Time}`;
@@ -948,10 +849,6 @@ function AppBody() {
     globalTrackSessions,
     previewSessions,
     dayExplorerSessions,
-    globalOverridesMap,
-    shouldSyncWithModified,
-    activeTrackOption,
-    activeTrackOverrideMap,
   ]);
   const registeredCount = registrations.length;
   const activePreviewCount =
@@ -1019,7 +916,7 @@ function AppBody() {
         continue;
       }
 
-      const lecturePrefix = String(session.GroupName || "").trim().toUpperCase();
+      const lecturePrefix = extractLecturePrefix(session.GroupName);
       for (const row of daySectionRows) {
         if (String(row.prefix || "").toUpperCase() === lecturePrefix) {
           map.get(row.id).push(session);
@@ -1263,6 +1160,7 @@ function AppBody() {
   function evaluateSchedule(sessions) {
     const occupied = new Map(DAYS.map((d) => [d, new Set()]));
     const lateSessions = new Set();
+    const earlySections = new Set();
     for (const s of sessions) {
       const day = normalizeDay(s);
       const range = slotRange(s, currentTimeSlots);
@@ -1272,6 +1170,10 @@ function AppBody() {
       if ((startMin ?? -1) >= LATE_THRESHOLD_MINUTES) {
         const key = `${day}|${s.courseId || s.courseName}|${s.GroupId}|${s.Time}`;
         lateSessions.add(key);
+      }
+      if (isSubgroup(s.Type) && (startMin ?? Number.POSITIVE_INFINITY) < 10 * 60 + 15) {
+        const key = `${day}|${s.courseId || s.courseName}|${s.GroupId}|${s.Time}`;
+        earlySections.add(key);
       }
     }
 
@@ -1290,6 +1192,7 @@ function AppBody() {
     }
 
     const after4Sessions = lateSessions.size;
+    const earlySectionCount = earlySections.size;
     const conflictCount = countSessionConflicts(sessions, currentTimeSlots);
     const scoreDays = Math.max(0, 100 - Math.max(0, activeDays - 1) * 18);
     const scoreGaps = Math.max(0, 100 - gapSlots * 10);
@@ -1301,6 +1204,7 @@ function AppBody() {
       activeDays,
       gapSlots,
       after4Sessions,
+      earlySectionCount,
       conflictCount,
       scoreDays,
       scoreGaps,
@@ -1324,7 +1228,7 @@ function AppBody() {
       for (const course of courses) {
         for (const session of course.sessions) {
           const gName = String(session.GroupName || "").trim().toUpperCase();
-          if (isLecture(session.Type) && gName === prefixUpper) {
+          if (isLecture(session.Type) && extractLecturePrefix(gName) === prefixUpper) {
             trackSessions.push({ ...session, courseId: course.id, courseName: course.name, source: "track" });
           }
           if (isSubgroup(session.Type) && sectionSet.has(gName)) {
@@ -1364,6 +1268,86 @@ function AppBody() {
     });
     return sorted;
   }, [allTrackCandidates, rankingCriterion]);
+
+  async function generateIrregularSchedules() {
+    if (!scoreEnabled || !courses.length || isGeneratingIrregular) return;
+    setIsGeneratingIrregular(true);
+    setIrregularScheduleCandidates([]);
+    const courseChoices = courses.map((course) => {
+      const split = groupsByCourseId.get(course.id) || { lectures: [], subgroups: [] };
+      const lectures = split.lectures || [];
+      const sections = split.subgroups || [];
+      const options = [];
+
+      for (const lecture of lectures) {
+        const sectionChoices = sections.length ? sections : [null];
+        for (const section of sectionChoices) {
+          const groups = [lecture, section].filter(Boolean);
+          options.push({
+            groupIds: groups.map((group) => group.id),
+            label: section ? `Lecture ${lecture.name} + Section ${section.name}` : `Lecture ${lecture.name}`,
+            sessions: groups.flatMap((group) =>
+              group.sessions.map((session) => ({
+                ...session,
+                courseId: course.id,
+                courseName: course.name,
+                source: "irregular-plan",
+              }))
+            ),
+          });
+        }
+      }
+
+      return { course, options };
+    });
+
+    if (courseChoices.some((item) => !item.options.length)) {
+      setIsGeneratingIrregular(false);
+      showNotice("error", "Irregular Analysis", "One or more courses have no available lecture groups.");
+      return;
+    }
+
+    let beam = [{ registrations: [], sessions: [], choices: [], score: evaluateSchedule([]) }];
+    const beamWidth = 120;
+
+    for (const { course, options } of courseChoices) {
+      const next = [];
+      for (const partial of beam) {
+        for (const option of options) {
+          const sessions = [...partial.sessions, ...option.sessions];
+          next.push({
+            registrations: [
+              ...partial.registrations,
+              { courseId: course.id, selectedGroupIds: option.groupIds },
+            ],
+            sessions,
+            choices: [...partial.choices, `${course.name}: ${option.label}`],
+            score: evaluateSchedule(sessions),
+          });
+        }
+      }
+      next.sort(
+        (a, b) =>
+          a.score.conflictCount - b.score.conflictCount ||
+          Math.abs(a.score.activeDays - 4) - Math.abs(b.score.activeDays - 4) ||
+          a.score.earlySectionCount - b.score.earlySectionCount ||
+          b.score.overall - a.score.overall ||
+          a.score.activeDays - b.score.activeDays ||
+          a.score.gapSlots - b.score.gapSlots
+      );
+      beam = next.slice(0, beamWidth);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    const results = beam.slice(0, 10).map((candidate, index) => ({
+      ...candidate,
+      id: `irregular-${index + 1}`,
+      name: `Irregular Plan ${index + 1}`,
+    }));
+    setIrregularScheduleCandidates(results);
+    setIsGeneratingIrregular(false);
+    showNotice("success", "Irregular Analysis", `Found ${results.length} optimized schedules.`);
+  }
 
   const currentDamageScore = useMemo(() => {
     return (
@@ -1508,9 +1492,14 @@ function AppBody() {
     e.preventDefault();
     if (!selectedCourse) return;
 
-    const chosenLecture = Number(lecturePick);
     const chosenSub = subPick ? Number(subPick) : null;
     const hasSubgroups = subgroupGroups.length > 0;
+
+    const selectedSubgroup = chosenSub ? subgroupGroups.find((group) => group.id === chosenSub) : null;
+    const linkedLecture = selectedSubgroup
+      ? lectureGroups.find((group) => lectureMatchesSection(group.name, selectedSubgroup.name))
+      : null;
+    const chosenLecture = linkedLecture?.id || Number(lecturePick);
 
     if (!chosenLecture) {
       showNotice("error", "Registration Error", "Select one lecture group first.");
@@ -1713,6 +1702,16 @@ function AppBody() {
     applyGlobalSectionTrack(selected.id);
   }
 
+  function applyIrregularSchedule(candidate) {
+    if (!candidate?.registrations?.length) return;
+    setRegistrations(candidate.registrations);
+    setGlobalTrack(null);
+    setGlobalTrackPick("");
+    setDayExplorer("all");
+    setPreview({});
+    showNotice("success", "Irregular Schedule Applied", `${candidate.name} was registered successfully.`);
+  }
+
   const modifyTargetTrack = trackById.get(modifyTrackId);
   const modifyTrackOverrides = modifyTargetTrack ? trackOverrides[modifyTargetTrack.id] || {} : {};
   const modifyTrackHasChanges = Boolean(
@@ -1729,7 +1728,7 @@ function AppBody() {
     for (const course of courses) {
       for (const raw of course.sessions) {
         const gName = String(raw.GroupName || "").trim().toUpperCase();
-        const matchesLecture = isLecture(raw.Type) && gName === prefixUpper;
+        const matchesLecture = isLecture(raw.Type) && extractLecturePrefix(gName) === prefixUpper;
         const matchesSubgroup = isSubgroup(raw.Type) && sectionSet.has(gName);
         if (!matchesLecture && !matchesSubgroup) continue;
         out.push({
@@ -1849,55 +1848,56 @@ function AppBody() {
     let destinationTrackIsModified = Boolean(modifyTargetTrack.isModified);
     let destinationBaseTrackId = modifyTargetTrack.baseTrackId || modifyTargetTrack.id;
 
-    const linkedModifiedTrack = trackOptions.find(
-      (track) => track.isModified && track.baseTrackId === modifyTargetTrack.id
-    );
-    const shouldAutoCreateModified = modifyMode === "new" || (!modifyTargetTrack.isModified && modifyMode === "regular");
+    const shouldAutoCreateModified = modifyMode === "new";
 
     if (shouldAutoCreateModified) {
-      if (linkedModifiedTrack && modifyMode === "regular") {
-        destinationTrackId = linkedModifiedTrack.id;
-        destinationTrackLabel = linkedModifiedTrack.label;
-        destinationTrackIsModified = true;
-        destinationBaseTrackId = linkedModifiedTrack.baseTrackId || modifyTargetTrack.id;
-      } else {
-        const existingLabels = new Set(trackOptions.map((track) => track.label));
-        const preferredLabel = `${modifyTargetTrack.label} Modified`;
-        const label = existingLabels.has(preferredLabel)
-          ? buildAutoModifiedLabel(modifyTargetTrack.label, existingLabels)
-          : preferredLabel;
-        const id = `custom-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
+      const existingLabels = new Set(trackOptions.map((track) => track.label));
+      const label = buildAutoModifiedLabel(modifyTargetTrack.label, existingLabels);
+      const id = `custom-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
 
-        setCustomTrackOptions((prev) => [
-          ...prev,
-          {
-            id,
-            label,
-            prefix: modifyTargetTrack.prefix,
-            sections: [...modifyTargetTrack.sections],
-            isModified: true,
-            mode: "modified",
-            baseTrackId: modifyTargetTrack.id,
-          },
-        ]);
-        destinationTrackId = id;
-        destinationTrackLabel = label;
-        destinationTrackIsModified = true;
-        destinationBaseTrackId = modifyTargetTrack.id;
-      }
+      setCustomTrackOptions((prev) => [
+        ...prev,
+        {
+          id,
+          label,
+          prefix: modifyTargetTrack.prefix,
+          sections: [...modifyTargetTrack.sections],
+          isModified: true,
+          mode: "modified",
+          baseTrackId: modifyTargetTrack.baseTrackId || modifyTargetTrack.id,
+        },
+      ]);
+      destinationTrackId = id;
+      destinationTrackLabel = label;
+      destinationTrackIsModified = true;
+      destinationBaseTrackId = modifyTargetTrack.baseTrackId || modifyTargetTrack.id;
+    }
+
+    const destinationOverrides = shouldAutoCreateModified
+      ? modifyTrackOverrides
+      : trackOverrides[destinationTrackId] || {};
+    const beforeSessions = editableTrackSessions.map((session) => ({
+      ...session,
+      ...(destinationOverrides[session.sessionKey] || {}),
+    }));
+    const afterSessions = editableTrackSessions.map((session) => ({
+      ...session,
+      ...(destinationOverrides[session.sessionKey] || {}),
+      ...(targetKeys.includes(session.sessionKey) ? payload : {}),
+    }));
+    const conflictsBefore = countSessionConflicts(beforeSessions, currentTimeSlots);
+    const conflictsAfter = countSessionConflicts(afterSessions, currentTimeSlots);
+    if (conflictsAfter > conflictsBefore) {
+      showNotice("error", "Modify Conflict", `This change creates ${conflictsAfter - conflictsBefore} new conflict(s). Choose another day or time.`);
+      return;
     }
 
     setTrackOverrides((prev) => ({
       ...prev,
       [destinationTrackId]: {
-        ...(prev[destinationTrackId] || {}),
-        ...mergePayloadToMap(prev[destinationTrackId] || {}),
+        ...destinationOverrides,
+        ...mergePayloadToMap(destinationOverrides),
       },
-    }));
-
-    setSharedTrackOverrides((prev) => ({
-      ...prev,
-      ...mergePayloadToMap(prev),
     }));
 
     setModifyTrackId(destinationTrackId);
@@ -1921,25 +1921,13 @@ function AppBody() {
 
   function revertTrackChanges() {
     if (!modifyTargetTrack) return;
-    const keysToRemove = Object.keys(modifyTrackOverrides || {});
 
     setTrackOverrides((prev) => {
       const next = { ...prev };
       delete next[modifyTargetTrack.id];
       return next;
     });
-    if (keysToRemove.length) {
-      setSharedTrackOverrides((prev) => {
-        const next = { ...prev };
-        for (const key of keysToRemove) delete next[key];
-        return next;
-      });
-    }
-
-    if (modifyTargetTrack.id === PRESET_C1_MODIFIED_ID && modifyTargetTrack.baseTrackId) {
-      setGlobalTrackPick(modifyTargetTrack.baseTrackId);
-      applyGlobalSectionTrack(modifyTargetTrack.baseTrackId);
-    } else if (globalTrackPick === modifyTargetTrack.id) {
+    if (globalTrackPick === modifyTargetTrack.id) {
       applyGlobalSectionTrack(modifyTargetTrack.id);
     }
 
@@ -1949,7 +1937,6 @@ function AppBody() {
   function removeModifiedTrackById(trackId) {
     const targetTrack = trackById.get(trackId);
     if (!targetTrack?.isModified) return;
-    const keysToRemove = Object.keys(trackOverrides[targetTrack.id] || {});
     const fallbackTrackId = targetTrack.baseTrackId || "";
 
     setTrackOverrides((prev) => {
@@ -1957,14 +1944,6 @@ function AppBody() {
       delete next[targetTrack.id];
       return next;
     });
-    if (keysToRemove.length) {
-      setSharedTrackOverrides((prev) => {
-        const next = { ...prev };
-        for (const key of keysToRemove) delete next[key];
-        return next;
-      });
-    }
-
     if (targetTrack.id.startsWith("custom-")) {
       setCustomTrackOptions((prev) => prev.filter((track) => track.id !== targetTrack.id));
     }
@@ -2009,7 +1988,7 @@ function AppBody() {
     }
   }
 
-  function downloadScheduleScreenshot() {
+  function captureScheduleImage(mode = "download", titleOverride = "") {
     if (!scheduleRef.current) return;
 
     const exportSchedule = async () => {
@@ -2031,6 +2010,20 @@ function AppBody() {
         snapshotRoot.style.padding = "18px";
         snapshotRoot.style.width = `${sourceTable.scrollWidth + 36}px`;
         snapshotRoot.style.zIndex = "-1";
+
+        const exportHeader = document.createElement("div");
+        const selectedLevel = new URLSearchParams(window.location.search).get("level") || "3";
+        const facultyTitle = document.createElement("h1");
+        facultyTitle.style.margin = "0 0 6px";
+        facultyTitle.textContent = "Faculty of Oral & Dental Medicine";
+        const scheduleTitle = document.createElement("h2");
+        scheduleTitle.style.margin = "0 0 6px";
+        scheduleTitle.textContent = titleOverride || printTitle;
+        const exportMeta = document.createElement("p");
+        exportMeta.style.margin = "0 0 14px";
+        exportMeta.textContent = `Level ${selectedLevel} · Current semester · Exported ${new Date().toLocaleString()}`;
+        exportHeader.append(facultyTitle, scheduleTitle, exportMeta);
+        snapshotRoot.appendChild(exportHeader);
 
         const tableClone = sourceTable.cloneNode(true);
         tableClone.style.overflow = "visible";
@@ -2103,14 +2096,47 @@ function AppBody() {
           },
         });
 
-        const dataUrl = canvas.toDataURL("image/png", 1.0);
-        const link = document.createElement("a");
-        link.href = dataUrl;
-        link.download = `${printTitle.replace(/\s+/g, "-").toLowerCase()}-schedule.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        showNotice("success", "Download Schedule", "Schedule screenshot downloaded.");
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png", 1));
+        if (mode === "collect") return canvas;
+        if (mode === "pdf") {
+          const { jsPDF } = await import("jspdf");
+          const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+          const pageWidth = pdf.internal.pageSize.getWidth();
+          const pageHeight = pdf.internal.pageSize.getHeight();
+          const margin = 6;
+          const renderWidth = pageWidth - margin * 2;
+          const renderHeight = (canvas.height * renderWidth) / canvas.width;
+          const usableHeight = pageHeight - margin * 2;
+          const pageCount = Math.max(1, Math.ceil(renderHeight / usableHeight));
+          const image = canvas.toDataURL("image/png", 1);
+
+          for (let page = 0; page < pageCount; page += 1) {
+            if (page > 0) pdf.addPage("a4", "landscape");
+            pdf.addImage(image, "PNG", margin, margin - page * usableHeight, renderWidth, renderHeight, undefined, "FAST");
+            pdf.setFillColor(255, 255, 255);
+            if (page > 0) pdf.rect(0, 0, pageWidth, margin, "F");
+            pdf.setFontSize(8);
+            pdf.setTextColor(70, 85, 105);
+            pdf.text(`Page ${page + 1} of ${pageCount}`, pageWidth - margin, pageHeight - 2, { align: "right" });
+          }
+
+          const selectedLevel = new URLSearchParams(window.location.search).get("level") || "3";
+          pdf.save(`dentistry-level-${selectedLevel}-${printTitle.replace(/\s+/g, "-").toLowerCase()}.pdf`);
+          showNotice("success", "Download PDF", "PDF downloaded using the same timetable design as the copied image.");
+        } else if (mode === "copy" && navigator.clipboard?.write && window.ClipboardItem) {
+          await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+          showNotice("success", "Copy as Image", "The complete schedule was copied to the clipboard.");
+        } else {
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `${printTitle.replace(/\s+/g, "-").toLowerCase()}-schedule.png`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          showNotice("success", mode === "copy" ? "Copy as Image" : "Download PNG", mode === "copy" ? "Clipboard images are unavailable; PNG downloaded instead." : "Schedule PNG downloaded.");
+        }
       } catch (err) {
         showNotice("error", "Download Schedule", err?.message || "Failed to capture schedule.");
       } finally {
@@ -2118,7 +2144,75 @@ function AppBody() {
       }
     };
 
-    exportSchedule();
+    return exportSchedule();
+  }
+
+  async function downloadAllLevelPdf() {
+    if (!trackOptions.length) {
+      showNotice("error", "Download All Level PDF", "No Group/Section schedules are available for this level.");
+      return;
+    }
+
+    const originalPick = globalTrackPick;
+    const originalTrack = globalTrack;
+    const originalPreview = preview;
+    const originalDay = dayExplorer;
+    try {
+      const { jsPDF } = await import("jspdf");
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      let firstPage = true;
+
+      for (const track of trackOptions) {
+        setGlobalTrackPick(track.id);
+        setGlobalTrack({
+          trackId: track.id,
+          section: track.label,
+          prefix: track.prefix,
+          sections: track.sections,
+          selectedSubgroup: track.label,
+          isModified: Boolean(track.isModified),
+        });
+        setPreview({});
+        setDayExplorer("all");
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+        const canvas = await captureScheduleImage("collect", `${track.label} Schedule`);
+        if (!canvas) continue;
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const margin = 6;
+        const renderWidth = pageWidth - margin * 2;
+        const renderHeight = (canvas.height * renderWidth) / canvas.width;
+        const usableHeight = pageHeight - margin * 2;
+        const pageCount = Math.max(1, Math.ceil(renderHeight / usableHeight));
+        const image = canvas.toDataURL("image/png", 1);
+
+        for (let page = 0; page < pageCount; page += 1) {
+          if (!firstPage) pdf.addPage("a4", "landscape");
+          firstPage = false;
+          pdf.addImage(image, "PNG", margin, margin - page * usableHeight, renderWidth, renderHeight, undefined, "FAST");
+        }
+      }
+
+      const totalPages = pdf.getNumberOfPages();
+      for (let page = 1; page <= totalPages; page += 1) {
+        pdf.setPage(page);
+        pdf.setFillColor(255, 255, 255);
+        pdf.rect(0, pdf.internal.pageSize.getHeight() - 5, pdf.internal.pageSize.getWidth(), 5, "F");
+        pdf.setFontSize(8).setTextColor(70, 85, 105);
+        pdf.text(`Page ${page} of ${totalPages}`, pdf.internal.pageSize.getWidth() - 6, pdf.internal.pageSize.getHeight() - 2, { align: "right" });
+      }
+      const selectedLevel = new URLSearchParams(window.location.search).get("level") || "3";
+      pdf.save(`dentistry-level-${selectedLevel}-all-schedules.pdf`);
+      showNotice("success", "Download All Level PDF", `Combined ${trackOptions.length} Editor schedules in one PDF.`);
+    } catch (err) {
+      showNotice("error", "Download All Level PDF", err?.message || "Failed to export all schedules.");
+    } finally {
+      setGlobalTrackPick(originalPick);
+      setGlobalTrack(originalTrack);
+      setPreview(originalPreview);
+      setDayExplorer(originalDay);
+    }
   }
 
   return (
@@ -2244,7 +2338,15 @@ function AppBody() {
                                   name="sub"
                                   value={g.id}
                                   checked={Number(subPick) === g.id}
-                                  onChange={(ev) => setSubPick(Number(ev.target.value))}
+                                  onChange={(ev) => {
+                                    const sectionId = Number(ev.target.value);
+                                    const section = subgroupGroups.find((group) => group.id === sectionId);
+                                    const lecture = section
+                                      ? lectureGroups.find((group) => lectureMatchesSection(group.name, section.name))
+                                      : null;
+                                    setSubPick(sectionId);
+                                    if (lecture) setLecturePick(lecture.id);
+                                  }}
                                 />
                                 <span>
                                   <strong>{g.name}</strong> ({g.type})
@@ -2368,8 +2470,17 @@ function AppBody() {
               <button className="btn secondary" type="button" onClick={toggleFullscreen}>
                 Full Screen
               </button>
-              <button className="btn secondary" type="button" onClick={downloadScheduleScreenshot}>
-                Download Schedule
+              <button className="btn secondary" type="button" onClick={() => captureScheduleImage("copy")}>
+                Copy as Image
+              </button>
+              <button className="btn secondary" type="button" onClick={() => captureScheduleImage("download")}>
+                Download PNG
+              </button>
+              <button className="btn secondary" type="button" onClick={() => captureScheduleImage("pdf")}>
+                Download Level PDF
+              </button>
+              <button className="btn secondary" type="button" onClick={downloadAllLevelPdf}>
+                Download All Level PDF
               </button>
               <button className="btn secondary" type="button" onClick={clearAll}>
                 Clear All
@@ -2691,7 +2802,16 @@ function AppBody() {
 
             {showAnalytics && (
               <>
-                {tableSessions.length > 0 && (
+                <div className="analytics-mode-switch" role="tablist" aria-label="Analytics type">
+                  <button type="button" className={`switch-btn ${analyticsMode === "regular" ? "active" : ""}`} onClick={() => setAnalyticsMode("regular")}>
+                    Regular Track Analytics
+                  </button>
+                  <button type="button" className={`switch-btn ${analyticsMode === "irregular" ? "active" : ""}`} onClick={() => setAnalyticsMode("irregular")}>
+                    Irregular Registration Analytics
+                  </button>
+                </div>
+
+                {analyticsMode === "regular" && tableSessions.length > 0 && (
                   <div className="free-time-grid">
                     {Array.from(freeTimeByDay.keys()).map((day) => {
                       const blocks = freeTimeByDay.get(day) || [];
@@ -2705,7 +2825,7 @@ function AppBody() {
                   </div>
                 )}
 
-                {scoreEnabled && hasBuiltSchedule && (
+                {analyticsMode === "regular" && scoreEnabled && hasBuiltSchedule && (
                   <div className="score-panel highlight">
                     <div className="score-header">
                       <h3>{currentTrackLabel ? `${currentTrackLabel} Analytics` : "Current Schedule Analytics"}</h3>
@@ -2719,7 +2839,7 @@ function AppBody() {
                   </div>
                 )}
 
-                {scoreEnabled && !hasBuiltSchedule && (
+                {analyticsMode === "regular" && scoreEnabled && !hasBuiltSchedule && (
                   <div className="score-panel">
                     <div className="score-header">
                       <h3>Section Ranking Analytics</h3>
@@ -2753,13 +2873,65 @@ function AppBody() {
                   </div>
                 )}
 
+                {analyticsMode === "irregular" && scoreEnabled && (
+                  <div className="score-panel">
+                    <div className="score-header">
+                      <div>
+                        <h3>Best Irregular Schedules</h3>
+                        <p className="muted score-line">
+                          Lecture and section groups may differ between courses. Conflict-free plans are ranked first.
+                        </p>
+                      </div>
+                      <button
+                        className="mini"
+                        type="button"
+                        disabled={isGeneratingIrregular}
+                        onClick={generateIrregularSchedules}
+                      >
+                        {isGeneratingIrregular ? "Analyzing..." : "Run Irregular Analysis"}
+                      </button>
+                    </div>
+                    {irregularScheduleCandidates.length > 0 ? (
+                      <div className="ranked-tracks">
+                        {irregularScheduleCandidates.map((candidate) => (
+                        <article key={candidate.id} className="rank-item irregular-rank-item">
+                          <div>
+                            <strong>{candidate.name}</strong>
+                            <small>
+                              Score {candidate.score.overall} | Days {candidate.score.activeDays}/4 target | Gaps{" "}
+                              {candidate.score.gapSlots} | After 4:15: {candidate.score.after4Sessions} | Conflicts{" "}
+                              {candidate.score.conflictCount} | Early Sections {candidate.score.earlySectionCount}
+                            </small>
+                            <details>
+                              <summary>Show selected groups</summary>
+                              <ul>
+                                {candidate.choices.map((choice) => (
+                                  <li key={`${candidate.id}-${choice}`}>{choice}</li>
+                                ))}
+                              </ul>
+                            </details>
+                          </div>
+                          <button className="mini" type="button" onClick={() => applyIrregularSchedule(candidate)}>
+                            Apply
+                          </button>
+                        </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted score-line">
+                        The optimizer runs only when requested, so opening the page stays fast.
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {!scoreEnabled && (
                   <p className="muted score-line">
                     Analytics is disabled while preview mode is active (All Lectures, All Sections, or Day View).
                   </p>
                 )}
 
-                {tableSessions.length > 0 && (
+                {analyticsMode === "regular" && tableSessions.length > 0 && (
                   <div className="recommendations-panel">
                     <h3>
                       Recommendations

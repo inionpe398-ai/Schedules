@@ -1612,3 +1612,19 @@ textarea {
     line-height: 1.2 !important;
   }
 }
+/* Level navigation and DULMS admin */
+.level-nav { display:flex; gap:8px; align-items:center; padding:10px 18px; background:#fff; border-bottom:1px solid #dbe4f0; position:sticky; top:0; z-index:20; }
+.level-nav a { color:#123a78; text-decoration:none; padding:7px 11px; border-radius:8px; font-weight:700; }
+.level-nav a.active { color:#fff; background:#0b438f; }
+.admin-page { max-width:1200px; margin:0 auto; padding:24px; font-family:Segoe UI,Tahoma,Arial,sans-serif; color:#10213a; }
+.admin-header,.admin-controls,.admin-auth,.score-header { display:flex; gap:14px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+.admin-header a { color:#0b438f; font-weight:700; }
+.admin-auth label,.admin-controls label { display:flex; gap:8px; align-items:center; }
+.admin-auth input,.admin-controls select { padding:9px; border:1px solid #cbd6e5; border-radius:8px; }
+.admin-course-table { overflow:auto; max-height:520px; }
+.admin-course-table table { width:100%; border-collapse:collapse; }
+.admin-course-table th,.admin-course-table td { text-align:left; padding:8px; border-bottom:1px solid #e0e7f0; }
+.sync-result pre { overflow:auto; background:#f5f8fc; padding:12px; border-radius:8px; }
+.sync-result .metric-badges span { padding:7px 10px; background:#edf4ff; border-radius:8px; }
+.irregular-rank-item { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+.analytics-mode-switch { display:flex; gap:8px; margin:12px 0; padding:6px; border-radius:12px; background:#eef3fa; width:max-content; max-width:100%; }

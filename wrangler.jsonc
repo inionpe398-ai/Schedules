@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "dulms-schedule-manager",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-09-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": { "directory": "./dist", "binding": "ASSETS", "run_worker_first": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dulms-schedule-data",
+      "database_id": "03d6ac5a-44bb-4195-bbb1-2abe8f3850c4",
+      "migrations_dir": "./migrations"
+    }
+  ]
+}

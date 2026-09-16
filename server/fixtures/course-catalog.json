@@ -1,0 +1,1064 @@
+{
+  "source": "/CourseHistory/GetProgramsubjects_forReg",
+  "method": "POST",
+  "retrievedAt": "2026-09-15T02:07:56.676Z",
+  "count": 132,
+  "courses": [
+    {
+      "category": "Preparatory courses",
+      "courseCode": "BAS00B",
+      "courseId": 2823,
+      "courseName": "Basics of Biology",
+      "creditHours": 0,
+      "level": null
+    },
+    {
+      "category": "Preparatory courses",
+      "courseCode": "BAS00E",
+      "courseId": 1704,
+      "courseName": "Basics of English",
+      "creditHours": 0,
+      "level": null
+    },
+    {
+      "category": "University Compulsory Courses",
+      "courseCode": "GEN001",
+      "courseId": 1039,
+      "courseName": "Introduction to Information and Communication Technology",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Compulsory Courses",
+      "courseCode": "GEN002",
+      "courseId": 995,
+      "courseName": "English Language I",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Compulsory Courses",
+      "courseCode": "GEN101",
+      "courseId": 996,
+      "courseName": "English Language II",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Compulsory Courses",
+      "courseCode": "GEN201",
+      "courseId": 1115,
+      "courseName": "Technical Report Writing I",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Compulsory Courses",
+      "courseCode": "GEN301",
+      "courseId": 1116,
+      "courseName": "Technical Report Writing II",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN003",
+      "courseId": 1083,
+      "courseName": "Psychology and Organization Behavior",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN004",
+      "courseId": 983,
+      "courseName": "Egyptian Civilization",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN005",
+      "courseId": 1132,
+      "courseName": "Introduction to Music",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN005 E",
+      "courseId": 3801,
+      "courseName": "Introduction to Law and Human Rights",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN006",
+      "courseId": 1133,
+      "courseName": "History of Theatre",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN102",
+      "courseId": 1048,
+      "courseName": "Leadership Team Approach and Communication Skills",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN103",
+      "courseId": 1080,
+      "courseName": "Professional Ethics",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN202",
+      "courseId": 1049,
+      "courseName": "Legislations Contract and Procurement Management",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN203",
+      "courseId": 1026,
+      "courseName": "Human Resources Management",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN302",
+      "courseId": 1008,
+      "courseName": "General Risk Management",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN303",
+      "courseId": 1134,
+      "courseName": "History and Contemporary Issues of Arab Media",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN304",
+      "courseId": 1135,
+      "courseName": "Introduction to Athletic Psychology",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN310",
+      "courseId": 1031,
+      "courseName": "Industrial Safety and Environmental Management",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN401",
+      "courseId": 1050,
+      "courseName": "Marketing skills",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN402",
+      "courseId": 973,
+      "courseName": "Creativity and Critical Thinking",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN403",
+      "courseId": 1037,
+      "courseName": "Introduction to Economics",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN404",
+      "courseId": 1084,
+      "courseName": "Public Administration",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "University Elective Courses",
+      "courseCode": "GEN505",
+      "courseId": 2757,
+      "courseName": "Quality Assurance",
+      "creditHours": 2,
+      "level": null
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 1101",
+      "courseId": 3935,
+      "courseName": "General Physiology I",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 1102",
+      "courseId": 3936,
+      "courseName": "Cellular and Molecular Biology",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 1103",
+      "courseId": 3937,
+      "courseName": "Gross Anatomy",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 1104",
+      "courseId": 3938,
+      "courseName": "General Histology I",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 1203",
+      "courseId": 3945,
+      "courseName": "General Physiology II",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 1204",
+      "courseId": 3946,
+      "courseName": "Biochemistry",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 1205",
+      "courseId": 3947,
+      "courseName": "Head and Neck Anatomy",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 1206",
+      "courseId": 3948,
+      "courseName": "General Histology II",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 2102",
+      "courseId": 3953,
+      "courseName": "General Pathology I",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 2103",
+      "courseId": 3954,
+      "courseName": "Pharmacology I",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 2104",
+      "courseId": 3955,
+      "courseName": "Microbiology and Immunology I",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 2202",
+      "courseId": 3960,
+      "courseName": "General Pathology II",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 2203",
+      "courseId": 3961,
+      "courseName": "Pharmacology II",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "I.1 Basic Medical Sciences",
+      "courseCode": "DEN 2205",
+      "courseId": 3963,
+      "courseName": "Microbiology and Immunology II",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "I.2 Basic Dental Sciences",
+      "courseCode": "DEN 1105",
+      "courseId": 3939,
+      "courseName": "Oral Biology and Histology I",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.2 Basic Dental Sciences",
+      "courseCode": "DEN 1106",
+      "courseId": 3940,
+      "courseName": "Dental Anatomy and morphology I",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.2 Basic Dental Sciences",
+      "courseCode": "DEN 1107",
+      "courseId": 3941,
+      "courseName": "Craniofacial Growth and Development",
+      "creditHours": 1,
+      "level": 1
+    },
+    {
+      "category": "I.2 Basic Dental Sciences",
+      "courseCode": "DEN 1108",
+      "courseId": 3942,
+      "courseName": "Dental Biomaterials I",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.2 Basic Dental Sciences",
+      "courseCode": "DEN 1207",
+      "courseId": 3949,
+      "courseName": "Oral Biology and Histology II",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.2 Basic Dental Sciences",
+      "courseCode": "DEN 1208",
+      "courseId": 3950,
+      "courseName": "Dental Anatomy and morphology II",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.2 Basic Dental Sciences",
+      "courseCode": "DEN 1209",
+      "courseId": 3951,
+      "courseName": "Dental Biomaterials II",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.2 Basic Dental Sciences",
+      "courseCode": "DEN 3109",
+      "courseId": 3975,
+      "courseName": "Oral Pathology I",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "I.2 Basic Dental Sciences",
+      "courseCode": "DEN 3211",
+      "courseId": 3987,
+      "courseName": "Oral Pathology II",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "I.3 Supportive Sciences",
+      "courseCode": "DEN 1201",
+      "courseId": 3943,
+      "courseName": "Biophysics",
+      "creditHours": 2,
+      "level": 1
+    },
+    {
+      "category": "I.3 Supportive Sciences",
+      "courseCode": "DEN 1202",
+      "courseId": 3944,
+      "courseName": "Professionalism, Ethics, Law",
+      "creditHours": 1,
+      "level": 1
+    },
+    {
+      "category": "I.3 Supportive Sciences",
+      "courseCode": "DEN 2101",
+      "courseId": 3952,
+      "courseName": "Interdisciplinary Service Learning and Communication Skills",
+      "creditHours": 1,
+      "level": 2
+    },
+    {
+      "category": "I.3 Supportive Sciences",
+      "courseCode": "DEN 2201",
+      "courseId": 3959,
+      "courseName": "Psychological and Behavioral Issues in Dental Practice",
+      "creditHours": 1,
+      "level": 2
+    },
+    {
+      "category": "I.3 Supportive Sciences",
+      "courseCode": "DEN 3201",
+      "courseId": 3977,
+      "courseName": "Biostatistics and Clinical Scientific Inquiry",
+      "creditHours": 1,
+      "level": 3
+    },
+    {
+      "category": "I.3 Supportive Sciences",
+      "courseCode": "DEN 3202",
+      "courseId": 3978,
+      "courseName": "Emergency Preparedness in the Dental Office",
+      "creditHours": 1,
+      "level": 3
+    },
+    {
+      "category": "II.1 Clinical Medical Sciences",
+      "courseCode": "DEN 3102",
+      "courseId": 3968,
+      "courseName": "General Surgery I",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.1 Clinical Medical Sciences",
+      "courseCode": "DEN 3103",
+      "courseId": 3969,
+      "courseName": "Internal Medicine I",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.1 Clinical Medical Sciences",
+      "courseCode": "DEN 3203",
+      "courseId": 3979,
+      "courseName": "Anxiety and Pain Control (General Anesthesia & sedation)",
+      "creditHours": 1,
+      "level": 3
+    },
+    {
+      "category": "II.1 Clinical Medical Sciences",
+      "courseCode": "DEN 3204",
+      "courseId": 3980,
+      "courseName": "General Surgery (ENT and Ophthalmology) II",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.1 Clinical Medical Sciences",
+      "courseCode": "DEN 3205",
+      "courseId": 3981,
+      "courseName": "Internal Medicine (Dermatology) II",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 2105",
+      "courseId": 3956,
+      "courseName": "Oral Public Health and Preventive Dentistry I",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 2106",
+      "courseId": 3957,
+      "courseName": "Operative Dentistry (Preclinical) I",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "Den 2107",
+      "courseId": 3958,
+      "courseName": "Removable Prosthodontics Preclinical I",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 2204",
+      "courseId": 3962,
+      "courseName": "Oral and Maxillofacial Radiology I",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 2206",
+      "courseId": 3964,
+      "courseName": "Oral Public Health and Preventive Dentistry II",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 2207",
+      "courseId": 3965,
+      "courseName": "Operative Dentistry (Preclinical) II",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "Den 2208",
+      "courseId": 3966,
+      "courseName": "Removable Prosthodontics Preclinical II",
+      "creditHours": 2,
+      "level": 2
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3101",
+      "courseId": 3967,
+      "courseName": "Anxiety and Pain Control (Local Anesthesia)",
+      "creditHours": 1,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3104",
+      "courseId": 3970,
+      "courseName": "Clinical Diagnosis and Treatment Planning I",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3105",
+      "courseId": 3971,
+      "courseName": "Operative Dentistry (Preclinical) III",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3106",
+      "courseId": 3972,
+      "courseName": "Removable Prosthodontics (Preclinical) III",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3107",
+      "courseId": 3973,
+      "courseName": "Fixed Prosthodontics (Preclinical) I",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3108",
+      "courseId": 3974,
+      "courseName": "Endodontics (Preclinical) I",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3112",
+      "courseId": 3976,
+      "courseName": "Oral and Maxillofacial Radiology II",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3206",
+      "courseId": 3982,
+      "courseName": "Clinical Diagnosis and Treatment Planning II",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3207",
+      "courseId": 3983,
+      "courseName": "Operative Dentistry (Preclinical) IV",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3208",
+      "courseId": 3984,
+      "courseName": "Removable Prosthodontics (Preclinical) II",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3209",
+      "courseId": 3985,
+      "courseName": "Fixed Prosthodontics (Preclinical) II",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 3210",
+      "courseId": 3986,
+      "courseName": "Endodontics (Preclinical) II",
+      "creditHours": 2,
+      "level": 3
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 4106",
+      "courseId": 3993,
+      "courseName": "Orthodontics (Preclinical) I",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 4107",
+      "courseId": 3994,
+      "courseName": "Pedodontics (Preclinical) I",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 4206",
+      "courseId": 4003,
+      "courseName": "Orthodontics (Preclinical) II",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.2 Preclinical Dental Sciences",
+      "courseCode": "DEN 4207",
+      "courseId": 4004,
+      "courseName": "Pedodontics (Preclinical) II",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4101",
+      "courseId": 3988,
+      "courseName": "Comprehensive Patient Care and Practice Management I",
+      "creditHours": 1,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4102",
+      "courseId": 3989,
+      "courseName": "Operative Dentistry V",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4103",
+      "courseId": 3990,
+      "courseName": "Removable Prosthodontics V",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4104",
+      "courseId": 3991,
+      "courseName": "Fixed Prosthodontics III",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4105",
+      "courseId": 3992,
+      "courseName": "Endodontics III",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4108",
+      "courseId": 3995,
+      "courseName": "Periodontics I",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4109",
+      "courseId": 3996,
+      "courseName": "Oral Medicine I",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4110",
+      "courseId": 3997,
+      "courseName": "Oral and Maxillofacial Surgery I",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4201",
+      "courseId": 3998,
+      "courseName": "Comprehensive Patient Care and Practice Management II",
+      "creditHours": 1,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4202",
+      "courseId": 3999,
+      "courseName": "Operative Dentistry VI",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4203",
+      "courseId": 4000,
+      "courseName": "Removable Prosthodontics VI",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4204",
+      "courseId": 4001,
+      "courseName": "Fixed Prosthodontics IV",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4205",
+      "courseId": 4002,
+      "courseName": "Endodontics IV",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4208",
+      "courseId": 4005,
+      "courseName": "Periodontics II",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4209",
+      "courseId": 4006,
+      "courseName": "Oral Medicine II",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 4210",
+      "courseId": 4007,
+      "courseName": "Oral and Maxillofacial Surgery II",
+      "creditHours": 2,
+      "level": 4
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5101",
+      "courseId": 4008,
+      "courseName": "Comprehensive Patient Care and Practice Management III",
+      "creditHours": 1,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5102",
+      "courseId": 4009,
+      "courseName": "Selection of Clinical Dental Materials I",
+      "creditHours": 1,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5103",
+      "courseId": 4010,
+      "courseName": "Operative Dentistry VII",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5104",
+      "courseId": 4011,
+      "courseName": "Removable Prosthodontics VII",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5105",
+      "courseId": 4012,
+      "courseName": "Fixed Prosthodontics V",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5106",
+      "courseId": 4013,
+      "courseName": "Endodontic V",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5107",
+      "courseId": 4014,
+      "courseName": "Orthodontics III",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5108",
+      "courseId": 4015,
+      "courseName": "Pedodontics III",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5109",
+      "courseId": 4016,
+      "courseName": "Periodontics III",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5110",
+      "courseId": 4017,
+      "courseName": "Advanced Radiographic Interpretations & Differential Diagnosis I",
+      "creditHours": 1,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5111",
+      "courseId": 4018,
+      "courseName": "Oral and Maxillofacial Surgery III",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5201",
+      "courseId": 4019,
+      "courseName": "Comprehensive Patient Care and Practice Management IV",
+      "creditHours": 1,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5202",
+      "courseId": 4020,
+      "courseName": "Selection of Clinical Dental Materials II",
+      "creditHours": 1,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5203",
+      "courseId": 4021,
+      "courseName": "Operative Dentistry VIII",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5204",
+      "courseId": 4022,
+      "courseName": "Removable Prosthodontics VIII",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5205",
+      "courseId": 4023,
+      "courseName": "Fixed Prosthodontics VI",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5206",
+      "courseId": 4024,
+      "courseName": "Endodontic VI",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5207",
+      "courseId": 4025,
+      "courseName": "Orthodontics IV",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5208",
+      "courseId": 4026,
+      "courseName": "Pedodontics IV",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5209",
+      "courseId": 4027,
+      "courseName": "Periodontics IV",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5210",
+      "courseId": 4028,
+      "courseName": "Advanced Radiographic Interpretations & Differential Diagnosis II",
+      "creditHours": 1,
+      "level": 5
+    },
+    {
+      "category": "II.3 Clinical Dental Sciences",
+      "courseCode": "DEN 5211",
+      "courseId": 4029,
+      "courseName": "Oral and Maxillofacial Surgery IV",
+      "creditHours": 2,
+      "level": 5
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 01",
+      "courseId": 4030,
+      "courseName": "Infection Prevention and Control",
+      "creditHours": 1,
+      "level": null
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 02",
+      "courseId": 4031,
+      "courseName": "Dental Stem Cells",
+      "creditHours": 1,
+      "level": null
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 03",
+      "courseId": 4032,
+      "courseName": "Lasers in Dentistry",
+      "creditHours": 1,
+      "level": null
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 04",
+      "courseId": 4033,
+      "courseName": "Implant Therapy for the General Dentist",
+      "creditHours": 1,
+      "level": null
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 05",
+      "courseId": 4034,
+      "courseName": "Resin Bonded Fixed Partial Dentures",
+      "creditHours": 1,
+      "level": null
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 06",
+      "courseId": 4035,
+      "courseName": "Digital Dentistry",
+      "creditHours": 1,
+      "level": null
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 07",
+      "courseId": 4036,
+      "courseName": "Research Methods",
+      "creditHours": 1,
+      "level": null
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 08",
+      "courseId": 4037,
+      "courseName": "Introduction to Forensic Dentistry",
+      "creditHours": 1,
+      "level": null
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 09",
+      "courseId": 4038,
+      "courseName": "Cosmetic and Esthetic Dentistry",
+      "creditHours": 1,
+      "level": null
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 10",
+      "courseId": 4039,
+      "courseName": "Operating the Microscope in Endodontics",
+      "creditHours": 1,
+      "level": null
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 11",
+      "courseId": 4040,
+      "courseName": "Dental Malpractice",
+      "creditHours": 1,
+      "level": null
+    },
+    {
+      "category": "C.FACULTY ELECTIVE COURSES",
+      "courseCode": "FEL 12",
+      "courseId": 4041,
+      "courseName": "Advanced Cephalometric Tracing",
+      "creditHours": 1,
+      "level": null
+    }
+  ]
+}

@@ -41,6 +41,23 @@ function sanitizeEntry(entry) {
 }
 
 export async function loadCourses() {
+  const requestedLevel = new URLSearchParams(window.location.search).get("level") || "3";
+  try {
+    const apiResponse = await fetch(`/api/schedules?level=${encodeURIComponent(requestedLevel)}`, { cache: "no-store" });
+    if (apiResponse.ok) {
+      const payload = await apiResponse.json();
+      if (Array.isArray(payload.courses) && payload.courses.length) {
+        return payload.courses.map((course) => ({
+          ...course,
+          sessions: course.sessions.map(sanitizeEntry),
+        }));
+      }
+    }
+  } catch {
+    // Static JSON remains a development/offline fallback for the existing Level 3 data.
+  }
+
+  if (requestedLevel !== "3") return [];
   for (const baseDir of DATA_DIRS) {
     const manifestRes = await fetch(`${baseDir}/manifest.json`, { cache: "no-store" });
     if (!manifestRes.ok) {
@@ -65,7 +82,7 @@ export async function loadCourses() {
       courses.push({
         id,
         file,
-        name: formatName(file),
+        name: cleanText(rows.find((row) => row?.NameEn_Faculty)?.NameEn_Faculty) || formatName(file),
         sessions: rows.map(sanitizeEntry),
       });
     }

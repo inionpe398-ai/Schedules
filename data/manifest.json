@@ -1,13 +1,14 @@
 ﻿{
   "files": [
-    "Economics.json",
-    "Infection.json",
-    "Micro.json",
-    "Operative.json",
-    "Oral Public.json",
-    "Patho.json",
-    "Pharma.json",
-    "Pyschological.json",
-    "Remove.json"
+    "GEN201 - Technical Report Writing I.json",
+    "DEN 3101 - Anxiety and Pain Control (Local Anesthesia).json",
+    "DEN 3102 - General Surgery I.json",
+    "DEN 3103 - Internal Medicine I.json",
+    "DEN 3104 - Clinical Diagnosis and Treatment Planning I.json",
+    "DEN 3105 - Operative Dentistry (Preclinical) III.json",
+    "DEN 3106 - Removable Prosthodontics (Preclinical) III.json",
+    "DEN 3107 - Fixed Prosthodontics (Preclinical) I.json",
+    "DEN 3108 - Endodontics (Preclinical) I.json",
+    "DEN 3109 - Oral Pathology I.json"
   ]
 }
