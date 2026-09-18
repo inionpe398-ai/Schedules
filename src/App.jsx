@@ -3,6 +3,7 @@ import { loadCourses } from "./lib/data";
 import {
   extractLecturePrefix,
   extractSectionPrefix,
+  groupTrackKey,
   lectureMatchesSection,
   pairedSectionLabel,
   parseSectionGroupName,
@@ -30,6 +31,9 @@ const TRACK_OVERRIDES_KEY = "scheduleTrackOverridesV1";
 const REMOVED_MODIFIED_TRACK_IDS_KEY = "scheduleRemovedModifiedTrackIdsV1";
 const LATE_THRESHOLD_MINUTES = 16 * 60 + 15;
 const MAX_PLAN_SEARCH_LIMIT = 20000;
+const LEVEL_ONE_SECTION_PRESET_COURSES = new Set([
+  "DEN 1101", "DEN 1103", "DEN 1104", "DEN 1106", "DEN 1108", "DEN 1201", "DEN 1202",
+]);
 const DAY_WEEK_BY_NAME = {
   Sunday: 1,
   Monday: 2,
@@ -157,6 +161,10 @@ class ErrorBoundary extends React.Component {
 
 function normalizeType(type) {
   return (type || "").toLowerCase().replace(/\s+/g, "");
+}
+
+function normalizedCourseCode(course) {
+  return String(course?.code || course?.id || "").trim().toUpperCase().replace(/\s+/g, " ");
 }
 
 function isSubgroup(type) {
@@ -415,6 +423,11 @@ function AppBody() {
   const allPdfAutoStartedRef = useRef(false);
 
   const coursesById = useMemo(() => new Map(courses.map((c) => [c.id, c])), [courses]);
+  const isLevelOne = new URLSearchParams(window.location.search).get("level") === "1";
+  const sectionPresetCourses = useMemo(
+    () => (isLevelOne ? courses.filter((course) => LEVEL_ONE_SECTION_PRESET_COURSES.has(normalizedCourseCode(course))) : courses),
+    [courses, isLevelOne]
+  );
   const currentTimeSlots = useMemo(() => {
     const profile = TIME_PROFILES[timeProfile];
     return Array.isArray(profile?.slots) && profile.slots.length ? profile.slots : TIME_SLOTS;
@@ -699,7 +712,7 @@ function AppBody() {
 
   const subgroupNames = useMemo(() => {
     const names = new Set();
-    for (const course of courses) {
+    for (const course of sectionPresetCourses) {
       for (const session of course.sessions) {
         if (isSubgroup(session.Type)) {
           const name = String(session.GroupName || "").trim();
@@ -708,7 +721,7 @@ function AppBody() {
       }
     }
     return Array.from(names);
-  }, [courses]);
+  }, [sectionPresetCourses]);
 
   const baseTrackOptions = useMemo(() => buildMergedTrackOptions(subgroupNames), [subgroupNames]);
 
@@ -776,15 +789,15 @@ function AppBody() {
   const globalTrackSessions = useMemo(() => {
     if (!globalTrack?.trackId || !globalTrack?.prefix) return [];
 
-    const sectionSet = new Set((globalTrack.sections || []).map((s) => String(s).trim().toUpperCase()));
+    const sectionSet = new Set((globalTrack.sections || []).map(groupTrackKey).filter(Boolean));
     const prefixUpper = globalTrack.prefix.toUpperCase();
     const trackId = globalTrack.trackId;
     const trackOverrideMap = trackOverrides[trackId] || {};
     const out = [];
 
-    for (const course of courses) {
+    for (const course of sectionPresetCourses) {
       for (const raw of course.sessions) {
-        const gName = String(raw.GroupName || "").trim().toUpperCase();
+        const gName = groupTrackKey(raw.GroupName);
         const matchesLecture = isLecture(raw.Type) && extractLecturePrefix(gName) === prefixUpper;
         const matchesSubgroup = isSubgroup(raw.Type) && sectionSet.has(gName);
         if (!matchesLecture && !matchesSubgroup) continue;
@@ -805,7 +818,7 @@ function AppBody() {
     }
 
     return out;
-  }, [globalTrack, courses, trackOverrides, trackById]);
+  }, [globalTrack, sectionPresetCourses, trackOverrides, trackById]);
 
   const plannerPreviewPlan = useMemo(
     () => damagePlans.find((plan) => plan.id === plannerPreviewPlanId) || null,
@@ -861,6 +874,9 @@ function AppBody() {
   const hasBuiltSchedule = tableSessions.length > 0 || Boolean(globalTrackPick);
 
   const printTitle = useMemo(() => {
+    if (dayExplorer !== "all") {
+      return `${dayExplorer} · Combined Sections Schedule`;
+    }
     if (globalTrack?.selectedSubgroup) {
       return `${globalTrack.selectedSubgroup} Schedule`;
     }
@@ -868,7 +884,7 @@ function AppBody() {
       return `${selectedCourse.name} Sections`;
     }
     return "Weekly Schedule";
-  }, [globalTrack, selectedCourse]);
+  }, [dayExplorer, globalTrack, selectedCourse]);
 
   const currentTrackLabel = useMemo(() => {
     if (globalTrack?.selectedSubgroup) return globalTrack.selectedSubgroup;
@@ -1222,12 +1238,12 @@ function AppBody() {
 
     for (const track of baseTrackOptions) {
       const prefixUpper = track.prefix.toUpperCase();
-      const sectionSet = new Set(track.sections.map((s) => String(s).trim().toUpperCase()));
+      const sectionSet = new Set(track.sections.map(groupTrackKey).filter(Boolean));
       const trackSessions = [];
 
-      for (const course of courses) {
+      for (const course of sectionPresetCourses) {
         for (const session of course.sessions) {
-          const gName = String(session.GroupName || "").trim().toUpperCase();
+          const gName = groupTrackKey(session.GroupName);
           if (isLecture(session.Type) && extractLecturePrefix(gName) === prefixUpper) {
             trackSessions.push({ ...session, courseId: course.id, courseName: course.name, source: "track" });
           }
@@ -1255,7 +1271,7 @@ function AppBody() {
     }
 
     return candidates;
-  }, [scoreEnabled, baseTrackOptions, courses, registeredSessions, currentTimeSlots]);
+  }, [scoreEnabled, baseTrackOptions, sectionPresetCourses, registeredSessions, currentTimeSlots]);
 
   const rankedTrackCandidates = useMemo(() => {
     const sorted = [...allTrackCandidates];
@@ -1722,12 +1738,12 @@ function AppBody() {
   const editableTrackSessions = useMemo(() => {
     if (!modifyTargetTrack) return [];
     const prefixUpper = modifyTargetTrack.prefix.toUpperCase();
-    const sectionSet = new Set(modifyTargetTrack.sections.map((s) => String(s).trim().toUpperCase()));
+    const sectionSet = new Set(modifyTargetTrack.sections.map(groupTrackKey).filter(Boolean));
     const out = [];
 
-    for (const course of courses) {
+    for (const course of sectionPresetCourses) {
       for (const raw of course.sessions) {
-        const gName = String(raw.GroupName || "").trim().toUpperCase();
+        const gName = groupTrackKey(raw.GroupName);
         const matchesLecture = isLecture(raw.Type) && extractLecturePrefix(gName) === prefixUpper;
         const matchesSubgroup = isSubgroup(raw.Type) && sectionSet.has(gName);
         if (!matchesLecture && !matchesSubgroup) continue;
@@ -1746,7 +1762,7 @@ function AppBody() {
       return String(a.courseName || "").localeCompare(String(b.courseName || ""));
     });
     return out;
-  }, [modifyTargetTrack, courses]);
+  }, [modifyTargetTrack, sectionPresetCourses]);
 
   const editableSessionOptions = useMemo(() => {
     const map = new Map();
@@ -2487,17 +2503,33 @@ function AppBody() {
               </button>
             </div>
           </div>
-          <div className="day-filter-row">
+          <div className="combined-tables-picker" aria-label="Combined section schedules">
+            <div className="combined-tables-copy">
+              <strong>Combined Section Tables</strong>
+              <span>Choose a day to view every section together, with shared lectures merged vertically.</span>
+            </div>
+            <div className="day-filter-row">
+              <button
+                key="day-explorer-all"
+                type="button"
+                className={`mini ${dayExplorer === "all" ? "on" : ""}`}
+                onClick={() => applyDayExplorer("all")}
+                aria-pressed={dayExplorer === "all"}
+              >
+                Weekly View
+              </button>
             {DAYS.map((day) => (
               <button
                 key={`day-explorer-${day}`}
                 type="button"
                 className={`mini ${dayExplorer === day ? "on" : ""}`}
                 onClick={() => applyDayExplorer(day)}
+                aria-pressed={dayExplorer === day}
               >
                 {day}
               </button>
             ))}
+            </div>
           </div>
           <div className="saved-management">
             <div className="saved-block">
@@ -2662,6 +2694,14 @@ function AppBody() {
               </div>
             </div>
           )}
+          <div className={`combined-table-title ${dayExplorer !== "all" ? "visible" : ""}`} aria-live="polite">
+            {dayExplorer !== "all" && (
+              <>
+                <strong>{dayExplorer} Combined Sections</strong>
+                <span>{daySectionRows.length} section tracks · shared lectures are merged</span>
+              </>
+            )}
+          </div>
           <h1 className="print-export-title">{printTitle}</h1>
           <div
             className={`timetable ${dayExplorer !== "all" ? "day-sections-mode" : ""}`}

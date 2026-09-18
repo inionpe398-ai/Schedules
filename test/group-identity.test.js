@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   extractLecturePrefix,
+  groupTrackKey,
   lectureMatchesSection,
   pairedSectionLabel,
   parseSectionGroupName,
@@ -21,4 +22,6 @@ test("preserves zero padding in paired section labels", () => {
     raw: "A01", upper: "A01", prefix: "A", number: 1, numberText: "01", token: "A01",
   });
   assert.equal(pairedSectionLabel("A01"), "A01/A02");
+  assert.equal(groupTrackKey("A01"), groupTrackKey("A1"));
+  assert.equal(groupTrackKey("Group A01"), groupTrackKey("A1"));
 });

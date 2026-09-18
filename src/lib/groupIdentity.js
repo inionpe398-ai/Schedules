@@ -57,6 +57,14 @@ export function parseSectionGroupName(groupName) {
   return parsed;
 }
 
+// A01 and A1 identify the same DULMS section. Keep the original name for
+// display, but use this key whenever sections are matched across courses.
+export function groupTrackKey(groupName) {
+  const parsed = parseGroupIdentity(groupName);
+  if (parsed?.number != null) return `${parsed.prefix}${parsed.number}`;
+  return cleanGroupName(groupName);
+}
+
 export function pairedSectionGroupNames(groupName) {
   const parsed = parseSectionGroupName(groupName);
   if (!parsed) {
