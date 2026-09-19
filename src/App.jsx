@@ -372,6 +372,33 @@ function sessionVerticalMergeSignature(session) {
   ].join("|");
 }
 
+// Keep a course's visual identity stable in the combined day table without
+// relying on a field that may be absent in imported DULMS/static data.
+const COMBINED_COURSE_THEMES = [
+  { surface: "#c9f2d1", accent: "#23854c", muted: "#effcf1" },
+  { surface: "#ffe39a", accent: "#b76a00", muted: "#fff9e8" },
+  { surface: "#cde8ff", accent: "#1971b9", muted: "#f0f8ff" },
+  { surface: "#e6d6ff", accent: "#7950b5", muted: "#faf5ff" },
+  { surface: "#ffd5c5", accent: "#c05621", muted: "#fff5f0" },
+  { surface: "#bfeeea", accent: "#087f7b", muted: "#effcfa" },
+  { surface: "#f7cde2", accent: "#b83280", muted: "#fff5fa" },
+  { surface: "#dcebb4", accent: "#5c7c18", muted: "#f8fceb" },
+];
+
+function combinedCourseTheme(session) {
+  const key = String(session?.courseId || session?.courseName || "course");
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
+  }
+  const theme = COMBINED_COURSE_THEMES[hash % COMBINED_COURSE_THEMES.length];
+  return {
+    "--course-surface": theme.surface,
+    "--course-accent": theme.accent,
+    "--course-muted": theme.muted,
+  };
+}
+
 function AppBody() {
   const [courses, setCourses] = useState([]);
   const [selectedCourseId, setSelectedCourseId] = useState("");
@@ -892,6 +919,18 @@ function AppBody() {
     return trackById.get(globalTrackPick)?.label || "";
   }, [globalTrack, globalTrackPick, trackById]);
   const visibleDays = useMemo(() => (dayExplorer === "all" ? DAYS : [dayExplorer]), [dayExplorer]);
+  const timetableTimeSlots = useMemo(() => {
+    let lastUsedSlot = 0;
+
+    for (const session of tableSessions) {
+      if (!visibleDays.includes(normalizeDay(session))) continue;
+      const range = slotRange(session, currentTimeSlots);
+      if (range) lastUsedSlot = Math.max(lastUsedSlot, range.end);
+    }
+
+    // Keep the empty schedule usable before any group/day is selected.
+    return lastUsedSlot ? currentTimeSlots.slice(0, lastUsedSlot) : currentTimeSlots;
+  }, [tableSessions, visibleDays, currentTimeSlots]);
   const daySectionRows = useMemo(() => {
     const tracks = baseTrackOptions.map((track) => {
       const firstParsed = parseSectionGroupName(track.sections[0] || "");
@@ -968,13 +1007,13 @@ function AppBody() {
 
     const rows = daySectionRows;
     const rowCount = rows.length;
-    const colCount = currentTimeSlots.length;
+    const colCount = timetableTimeSlots.length;
     const occupancy = Array.from({ length: rowCount }, () => Array.from({ length: colCount }, () => null));
 
     for (let r = 0; r < rowCount; r += 1) {
       const sessions = dayExplorerSessionMap.get(rows[r].id) || [];
       for (const session of sessions) {
-        const range = slotRange(session, currentTimeSlots);
+        const range = slotRange(session, timetableTimeSlots);
         if (!range) continue;
         const signature = sessionVerticalMergeSignature(session);
         for (let c = range.start; c < range.end; c += 1) {
@@ -1037,7 +1076,7 @@ function AppBody() {
     }
 
     return { rows, starts, covered, colCount };
-  }, [dayExplorer, daySectionRows, currentTimeSlots, dayExplorerSessionMap]);
+  }, [dayExplorer, daySectionRows, timetableTimeSlots, dayExplorerSessionMap]);
 
   function displayGroupNameInCard(session) {
     if (!isSubgroup(session?.Type)) return session?.GroupName;
@@ -2046,6 +2085,20 @@ function AppBody() {
         tableClone.style.width = "max-content";
         tableClone.style.background = "#ffffff";
 
+        const prepareCombinedLessonsForImage = (root) => {
+          root.querySelectorAll(".sections-day-lesson").forEach((lesson) => {
+            // html2canvas can render CSS-variable backgrounds darker than their
+            // on-screen values. Give the clone the exact light source color.
+            const courseSurface = lesson.style.getPropertyValue("--course-surface").trim();
+            lesson.style.background = courseSurface || "#f1f5f9";
+            lesson.style.backgroundColor = courseSurface || "#f1f5f9";
+            lesson.style.borderColor = "#b8c7d9";
+            lesson.style.boxShadow = "none";
+          });
+        };
+
+        prepareCombinedLessonsForImage(tableClone);
+
         tableClone.querySelectorAll(".timetable, .day-row, .day-grid, .slot-cell").forEach((el) => {
           el.style.background = "#ffffff";
           el.style.backgroundColor = "#ffffff";
@@ -2109,6 +2162,8 @@ function AppBody() {
                 "important"
               );
             });
+
+            prepareCombinedLessonsForImage(clonedDoc);
           },
         });
 
@@ -2696,20 +2751,29 @@ function AppBody() {
           )}
           <div className={`combined-table-title ${dayExplorer !== "all" ? "visible" : ""}`} aria-live="polite">
             {dayExplorer !== "all" && (
-              <>
-                <strong>{dayExplorer} Combined Sections</strong>
-                <span>{daySectionRows.length} section tracks · shared lectures are merged</span>
-              </>
+              <div className="combined-table-title-row">
+                <div className="combined-table-title-copy">
+                  <strong>{dayExplorer} Combined Sections</strong>
+                  <span>{daySectionRows.length} section tracks · shared lectures are merged</span>
+                </div>
+                <button
+                  className="mini combined-copy-image"
+                  type="button"
+                  onClick={() => captureScheduleImage("copy", `${dayExplorer} Combined Sections Schedule`)}
+                >
+                  Copy Image
+                </button>
+              </div>
             )}
           </div>
           <h1 className="print-export-title">{printTitle}</h1>
           <div
             className={`timetable ${dayExplorer !== "all" ? "day-sections-mode" : ""}`}
-            style={{ "--slots-count": currentTimeSlots.length }}
+            style={{ "--slots-count": timetableTimeSlots.length }}
           >
             <div className="time-header">
               <div className="corner">{dayExplorer === "all" ? "Day / Time" : "Section / Time"}</div>
-              {currentTimeSlots.map((slot) => (
+              {timetableTimeSlots.map((slot) => (
                 <div className="time-cell" key={slot}>
                   {formatSlotLabel(slot, timeFormat)}
                 </div>
@@ -2721,13 +2785,13 @@ function AppBody() {
                 <div className="day-row" key={day}>
                   <div className="day-label">{day}</div>
                   <div className="day-grid">
-                    {currentTimeSlots.map((slot) => (
+                    {timetableTimeSlots.map((slot) => (
                       <div className="slot-cell" key={`${day}-${slot}`} />
                     ))}
                     {tableSessions
                       .filter((s) => normalizeDay(s) === day)
                       .map((s, idx) => {
-                        const range = slotRange(s, currentTimeSlots);
+                        const range = slotRange(s, timetableTimeSlots);
                         if (!range) return null;
 
                         return (
@@ -2786,8 +2850,11 @@ function AppBody() {
                               rowSpan={block.rowSpan}
                               colSpan={block.colSpan}
                               className={`sections-day-lesson ${blockKindByType(s.Type)} ${
+                                isLecture(s.Type) ? "lecture" : ""
+                              } ${
                                 s.isModified ? "modified" : ""
                               } ${isLecture(s.Type) && block.rowSpan > 1 ? "vertical-merged" : ""}`}
+                              style={combinedCourseTheme(s)}
                               title={`${s.courseName} | ${displayGroupNameInCard(s)} | ${s.Time}`}
                             >
                               <div className="sections-day-lesson-content">

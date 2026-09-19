@@ -621,6 +621,22 @@ textarea {
   display: grid;
 }
 
+.combined-table-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.combined-table-title-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.combined-copy-image {
+  flex: 0 0 auto;
+}
+
 .time-header,
 .day-row {
   width: max-content;
@@ -698,14 +714,33 @@ textarea {
   padding: 8px 6px;
 }
 
+.timetable.day-sections-mode {
+  --combined-slot-width: calc(var(--slot-width) * 1.15);
+  --combined-row-height: calc(72px * 0.85);
+}
+
+.timetable.day-sections-mode .time-header {
+  min-width: calc(var(--day-col) + (var(--combined-slot-width) * var(--slots-count)));
+  grid-template-columns: var(--day-col) repeat(var(--slots-count), var(--combined-slot-width));
+}
+
 .sections-day-table {
   width: max-content;
   min-width: calc(var(--day-col) + (var(--slot-width) * var(--slots-count)));
   border-collapse: collapse;
+  background: #dce5f0;
 }
 
 .sections-day-table tr {
   height: 72px;
+}
+
+.timetable.day-sections-mode .sections-day-table {
+  min-width: calc(var(--day-col) + (var(--combined-slot-width) * var(--slots-count)));
+}
+
+.timetable.day-sections-mode .sections-day-table tr {
+  height: var(--combined-row-height);
 }
 
 .sections-day-label {
@@ -713,12 +748,13 @@ textarea {
   min-width: var(--day-col);
   max-width: var(--day-col);
   border: 1px solid var(--line);
-  background: #f8fbff;
-  color: #0f172a;
+  background: linear-gradient(180deg, #f8fbff 0%, #edf4fb 100%);
+  color: #173150;
   font-size: 0.8rem;
   font-weight: 800;
   text-align: center;
   padding: 8px 6px;
+  letter-spacing: 0.01em;
 }
 
 .sections-day-empty,
@@ -729,25 +765,36 @@ textarea {
   vertical-align: top;
 }
 
+.timetable.day-sections-mode .sections-day-empty,
+.timetable.day-sections-mode .sections-day-lesson {
+  width: var(--combined-slot-width);
+  min-width: var(--combined-slot-width);
+}
+
 .sections-day-empty {
-  background: #fff;
+  background:
+    linear-gradient(90deg, rgba(210, 223, 238, 0.38) 1px, transparent 1px),
+    #ffffff;
+  background-size: 100% 100%;
 }
 
 .sections-day-lesson {
   border-radius: 0;
-  padding: 4px;
+  padding: 6px 7px;
   font-size: 0.68rem;
-  line-height: 1.2;
-  color: #111;
+  line-height: 1.25;
+  color: #102113;
   overflow: hidden;
+  background: var(--course-surface, #e2e8f0);
+  border-color: var(--course-accent, #64748b);
 }
 
 .sections-day-lesson.group {
-  background: #7bd67b;
+  background: var(--course-surface, #c9f2d1);
 }
 
 .sections-day-lesson.subgroup {
-  background: #ffda80;
+  background: var(--course-surface, #ffe39a);
 }
 
 .sections-day-lesson.modified {
@@ -757,7 +804,7 @@ textarea {
 
 .sections-day-lesson-content {
   display: grid;
-  gap: 2px;
+  gap: 3px;
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -765,6 +812,26 @@ textarea {
 
 .sections-day-lesson-content strong {
   font-weight: 800;
+  color: #102113;
+}
+
+.sections-day-lesson.lecture {
+  vertical-align: middle;
+}
+
+.sections-day-lesson.lecture .sections-day-lesson-content {
+  justify-items: center;
+  text-align: center;
+}
+
+.sections-day-lesson-content span:first-of-type {
+  color: var(--course-accent, #334155);
+  font-weight: 800;
+}
+
+.sections-day-lesson-content span:last-of-type {
+  color: #314154;
+  font-size: 0.64rem;
 }
 
 .sections-day-lesson.vertical-merged {
@@ -779,9 +846,9 @@ textarea {
   align-content: center;
   justify-items: stretch;
   gap: 5px;
-  padding: 6px;
+  padding: 9px 10px;
   overflow: hidden;
-  text-align: left;
+  text-align: center;
   font-size: 0.7rem;
   line-height: 1.25;
   font-weight: 700;
@@ -791,7 +858,7 @@ textarea {
 
 .sections-day-lesson.vertical-merged .sections-day-lesson-content strong {
   font-weight: 800;
-  font-size: 0.72rem;
+  font-size: 0.74rem;
 }
 
 .sections-day-lesson.vertical-merged .sections-day-lesson-content span {
