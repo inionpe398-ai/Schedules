@@ -414,6 +414,7 @@ function AppBody() {
   const [registerPresets, setRegisterPresets] = useState([]);
   const [selectedRegisterPresetId, setSelectedRegisterPresetId] = useState("");
   const [dayExplorer, setDayExplorer] = useState("all");
+  const [isExportingWeeklyCombinedPdf, setIsExportingWeeklyCombinedPdf] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [analyticsMode, setAnalyticsMode] = useState("regular");
   const [irregularScheduleCandidates, setIrregularScheduleCandidates] = useState([]);
@@ -734,6 +735,17 @@ function AppBody() {
     }
     return out;
   }, [courses, dayExplorer]);
+
+  const combinedDaysWithSessions = useMemo(() => {
+    const activeDays = new Set();
+    for (const course of courses) {
+      for (const session of course.sessions) {
+        const day = normalizeDay(session);
+        if (DAYS.includes(day)) activeDays.add(day);
+      }
+    }
+    return DAYS.filter((day) => activeDays.has(day));
+  }, [courses]);
 
   const applyStaffPreset = (session) => session;
 
@@ -2286,6 +2298,87 @@ function AppBody() {
     }
   }
 
+  async function downloadWeeklyCombinedPdf() {
+    if (!combinedDaysWithSessions.length) {
+      showNotice("error", "Weekly Combined PDF", "No scheduled days are available for this level.");
+      return;
+    }
+
+    const originalPick = globalTrackPick;
+    const originalTrack = globalTrack;
+    const originalPreview = preview;
+    const originalDay = dayExplorer;
+    setIsExportingWeeklyCombinedPdf(true);
+
+    try {
+      const { jsPDF } = await import("jspdf");
+      const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+      let exportedPages = 0;
+      const exportedDays = [];
+
+      setGlobalTrackPick("");
+      setGlobalTrack(null);
+      setPreview({});
+
+      for (const day of combinedDaysWithSessions) {
+        setDayExplorer(day);
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+        const canvas = await captureScheduleImage("collect", `${day} · Combined Sections Schedule`);
+        if (!canvas) continue;
+
+        if (exportedPages > 0) pdf.addPage("a4", "landscape");
+        const pageWidth = pdf.internal.pageSize.getWidth();
+        const pageHeight = pdf.internal.pageSize.getHeight();
+        const margin = 6;
+        const footerHeight = 5;
+        const usableWidth = pageWidth - margin * 2;
+        const usableHeight = pageHeight - margin * 2 - footerHeight;
+        const scale = Math.min(usableWidth / canvas.width, usableHeight / canvas.height);
+        const renderWidth = canvas.width * scale;
+        const renderHeight = canvas.height * scale;
+        const x = (pageWidth - renderWidth) / 2;
+        const y = margin + Math.max(0, (usableHeight - renderHeight) / 2);
+
+        pdf.addImage(canvas.toDataURL("image/png", 1), "PNG", x, y, renderWidth, renderHeight, undefined, "FAST");
+        exportedPages += 1;
+        exportedDays.push(day);
+      }
+
+      if (!exportedPages) {
+        showNotice("error", "Weekly Combined PDF", "The combined schedules could not be captured.");
+        return;
+      }
+
+      for (let page = 1; page <= exportedPages; page += 1) {
+        pdf.setPage(page);
+        pdf.setFontSize(8).setTextColor(70, 85, 105);
+        pdf.text(
+          `${exportedDays[page - 1]} · Page ${page} of ${exportedPages}`,
+          pdf.internal.pageSize.getWidth() - 6,
+          pdf.internal.pageSize.getHeight() - 2,
+          { align: "right" }
+        );
+      }
+
+      const selectedLevel = new URLSearchParams(window.location.search).get("level") || "3";
+      pdf.save(`dentistry-level-${selectedLevel}-weekly-combined.pdf`);
+      showNotice(
+        "success",
+        "Weekly Combined PDF",
+        `Downloaded ${exportedPages} active day${exportedPages === 1 ? "" : "s"} in one PDF.`
+      );
+    } catch (err) {
+      showNotice("error", "Weekly Combined PDF", err?.message || "Failed to export the weekly combined schedules.");
+    } finally {
+      setGlobalTrackPick(originalPick);
+      setGlobalTrack(originalTrack);
+      setPreview(originalPreview);
+      setDayExplorer(originalDay);
+      setIsExportingWeeklyCombinedPdf(false);
+    }
+  }
+
   return (
     <div className={`app ${tableOnly ? "table-only" : ""}`}>
       {error && <div className="error">{error}</div>}
@@ -2584,6 +2677,14 @@ function AppBody() {
                 {day}
               </button>
             ))}
+              <button
+                type="button"
+                className="mini weekly-combined-pdf"
+                onClick={downloadWeeklyCombinedPdf}
+                disabled={isExportingWeeklyCombinedPdf || !combinedDaysWithSessions.length}
+              >
+                {isExportingWeeklyCombinedPdf ? "Building PDF..." : "Weekly Combined PDF"}
+              </button>
             </div>
           </div>
           <div className="saved-management">

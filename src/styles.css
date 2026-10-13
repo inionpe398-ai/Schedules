@@ -440,6 +440,17 @@ textarea {
   color: #123f69;
 }
 
+.mini.weekly-combined-pdf {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+
+.mini.weekly-combined-pdf:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .mini.danger {
   grid-column: 1 / -1;
   border-color: #fda4af;
