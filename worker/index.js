@@ -111,15 +111,35 @@ async function handleApi(request, env, ctx) {
   const url = new URL(request.url); const path = url.pathname;
   if (path === "/api/schedules") {
     const level = url.searchParams.get("level") || "3"; if (!(level === "all" || level === "general" || /^[1-5]$/.test(level))) return json({ error: "Invalid level" }, 400);
-    const where = level === "all" ? "c.is_active=1" : level === "general" ? "c.is_active=1 AND c.academic_level IS NULL" : "c.is_active=1 AND (c.academic_level=? OR EXISTS (SELECT 1 FROM dulms_course_level_links l WHERE l.course_id=c.id AND l.academic_level=?))";
-    const args = level === "all" || level === "general" ? [] : [Number(level), Number(level)];
+    const where = level === "all" ? "c.is_active=1" : level === "general" ? "c.is_active=1 AND c.academic_level IS NULL" : "c.is_active=1 AND EXISTS (SELECT 1 FROM dulms_course_level_links l WHERE l.course_id=c.id AND l.academic_level=?)";
+    const args = level === "all" || level === "general" ? [] : [Number(level)];
     const courses = await env.DB.prepare(`SELECT * FROM dulms_courses c WHERE ${where} ORDER BY c.course_code`).bind(...args).all();
     const result = [];
     for (const course of courses.results) { const sessions = await env.DB.prepare("SELECT * FROM dulms_sessions WHERE course_id=? AND is_active=1 ORDER BY day_week,start_time").bind(course.id).all(); if (sessions.results.length) result.push({ id: course.normalized_course_code, courseId: course.source_course_id, code: course.course_code, name: course.course_name, academicLevel: course.academic_level, sessions: sessions.results.map((s) => ({ ...JSON.parse(s.raw_json), DayWeek: s.day_week, DayWeekName: s.day_name, GroupId: s.source_group_id, GroupName: s.group_name, Type: s.group_type, Time: s.raw_time, ClassRoomName: s.room_raw, Staff: s.staff })) }); }
     return json({ level, courses: result });
   }
   const denied = requireAdmin(request, env); if (denied) return json({ error: denied }, 401);
-  if (path === "/api/admin/dulms-courses" && request.method === "GET") return json((await env.DB.prepare("SELECT id,source_course_id,course_code,course_name,category,academic_level,credit_hours,is_active,last_synced_at FROM dulms_courses ORDER BY academic_level,course_code").all()).results);
+  if (path === "/api/admin/dulms-courses" && request.method === "GET") {
+    const rows = await env.DB.prepare("SELECT c.id,c.source_course_id,c.course_code,c.course_name,c.category,c.academic_level,c.credit_hours,c.is_active,c.last_synced_at,GROUP_CONCAT(l.academic_level) AS linked_levels FROM dulms_courses c LEFT JOIN dulms_course_level_links l ON l.course_id=c.id GROUP BY c.id ORDER BY c.academic_level,c.course_code").all();
+    return json(rows.results.map((course) => ({ ...course, linkedLevels: course.linked_levels ? course.linked_levels.split(',').map(Number) : [] })));
+  }
+  const levelCoursesMatch = path.match(/^\/api\/admin\/levels\/([1-5])\/courses$/);
+  if (levelCoursesMatch && request.method === "PUT") {
+    const level = Number(levelCoursesMatch[1]);
+    const body = await request.json();
+    if (!Array.isArray(body.courseIds)) return json({ error: "courseIds must be an array" }, 400);
+    const courseIds = [...new Set(body.courseIds.map(Number))];
+    if (courseIds.some((id) => !Number.isInteger(id) || id < 1)) return json({ error: "Invalid course id" }, 400);
+    if (courseIds.length) {
+      const placeholders = courseIds.map(() => "?").join(",");
+      const found = await env.DB.prepare(`SELECT COUNT(*) AS count FROM dulms_courses WHERE id IN (${placeholders})`).bind(...courseIds).first();
+      if (Number(found?.count) !== courseIds.length) return json({ error: "One or more courses were not found" }, 400);
+    }
+    const statements = [env.DB.prepare("DELETE FROM dulms_course_level_links WHERE academic_level=?").bind(level)];
+    courseIds.forEach((courseId) => statements.push(env.DB.prepare("INSERT INTO dulms_course_level_links(course_id,academic_level) VALUES (?,?)").bind(courseId, level)));
+    await env.DB.batch(statements);
+    return json({ ok: true, level, assigned: courseIds.length });
+  }
   if (path === "/api/admin/dulms-sync/preview" && request.method === "POST") { const body = await request.json(); const scope = String(body.scope || "all"); if (!(scope === "all" || scope === "general" || /^[1-5]$/.test(scope))) return json({ error: "Invalid sync scope" }, 400); const id = crypto.randomUUID(); await env.DB.prepare("INSERT INTO dulms_sync_runs(id,status,mode,requested_scope,refresh_catalog,started_at) VALUES (?,'running','preview',?,?,?)").bind(id, scope, body.refreshCatalog === false ? 0 : 1, now()).run(); ctx.waitUntil(runPreview(env, id, scope)); return json({ runId: id }, 202); }
   if (path === "/api/admin/dulms-sync/apply" && request.method === "POST") { const body = await request.json(); if (!body.runId || body.confirm !== true) return json({ error: "Explicit confirmation is required" }, 400); try { return json({ summary: await applySnapshot(env, body.runId) }); } catch (error) { return json({ error: error.message }, 400); } }
   const runMatch = path.match(/^\/api\/admin\/dulms-sync\/([^/]+)$/); if (runMatch && request.method === "GET") { const run = await env.DB.prepare("SELECT * FROM dulms_sync_runs WHERE id=?").bind(runMatch[1]).first(); return run ? json({ ...run, summary: run.summary_json ? JSON.parse(run.summary_json) : null }) : json({ error: "Sync run not found" }, 404); }
