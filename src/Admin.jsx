@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 const scopes = ["1", "2", "3", "4", "5", "general", "all"];
 
@@ -20,10 +20,58 @@ export default function Admin() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [courses, setCourses] = useState([]);
+  const [courseLevel, setCourseLevel] = useState("3");
+  const [courseSearch, setCourseSearch] = useState("");
+  const [selectedCourses, setSelectedCourses] = useState(new Set());
+  const [assignmentsDirty, setAssignmentsDirty] = useState(false);
+  const [saveState, setSaveState] = useState("");
+  const deferredSearch = useDeferredValue(courseSearch);
 
   async function loadCourses() {
     try { setCourses(await adminFetch("/api/admin/dulms-courses", apiKey)); setError(""); }
     catch (err) { setError(err.message); }
+  }
+
+  useEffect(() => {
+    const level = Number(courseLevel);
+    setSelectedCourses(new Set(courses.filter((course) => course.linkedLevels?.includes(level)).map((course) => course.id)));
+    setAssignmentsDirty(false);
+    setSaveState("");
+  }, [courses, courseLevel]);
+
+  const filteredCourses = useMemo(() => {
+    const query = deferredSearch.trim().toLowerCase();
+    return courses.filter((course) => !query || `${course.course_code} ${course.course_name}`.toLowerCase().includes(query));
+  }, [courses, deferredSearch]);
+
+  function toggleCourse(courseId) {
+    setSelectedCourses((current) => {
+      const next = new Set(current);
+      next.has(courseId) ? next.delete(courseId) : next.add(courseId);
+      return next;
+    });
+    setAssignmentsDirty(true);
+    setSaveState("");
+  }
+
+  function setFilteredSelection(checked) {
+    setSelectedCourses((current) => {
+      const next = new Set(current);
+      filteredCourses.forEach((course) => checked ? next.add(course.id) : next.delete(course.id));
+      return next;
+    });
+    setAssignmentsDirty(true);
+    setSaveState("");
+  }
+
+  async function saveLevelCourses() {
+    setBusy(true); setError(""); setSaveState("");
+    try {
+      const result = await adminFetch(`/api/admin/levels/${courseLevel}/courses`, apiKey, { method: "PUT", body: JSON.stringify({ courseIds: [...selectedCourses] }) });
+      setCourses((current) => current.map((course) => ({ ...course, linkedLevels: selectedCourses.has(course.id) ? [...new Set([...(course.linkedLevels || []).filter((level) => level !== Number(courseLevel)), Number(courseLevel)])] : (course.linkedLevels || []).filter((level) => level !== Number(courseLevel)) })));
+      setAssignmentsDirty(false);
+      setSaveState(`${result.assigned} courses saved for Level ${courseLevel}`);
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
   async function preview() {
@@ -78,6 +126,26 @@ export default function Admin() {
           <button className="mini" disabled={!apiKey || scope === "all"} onClick={downloadPdf}>Download All Level PDF</button>
         </div>
         {run && <div className="sync-result"><p>Status: <strong>{run.status}</strong> {run.progress_total ? `(${run.progress_current}/${run.progress_total})` : ""}</p>{run.safe_error && <p>{run.safe_error}</p>}{summary && <><div className="metric-badges"><span>Added {summary.created}</span><span>Updated {summary.updated}</span><span>Deactivated {summary.deactivated}</span><span>Unchanged {summary.unchanged}</span><span>Failed {summary.failed?.length || 0}</span></div><pre>{JSON.stringify(summary.coverageByLevel, null, 2)}</pre>{run.status === "preview_ready" && <button className="btn" disabled={busy} onClick={apply}>Confirm & Apply</button>}</>}</div>}
+      </section>
+      <section className="panel level-course-manager">
+        <div className="level-course-heading">
+          <div><p className="eyebrow">Level content</p><h2>Assign courses to a Level</h2><p>Choose exactly which courses appear in each level's schedule.</p></div>
+          <label className="level-picker">Level<select value={courseLevel} onChange={(e) => setCourseLevel(e.target.value)}>{[1, 2, 3, 4, 5].map((level) => <option key={level} value={level}>Level {level}</option>)}</select></label>
+        </div>
+        <div className="course-manager-toolbar">
+          <label className="course-search"><span aria-hidden="true">⌕</span><input type="search" placeholder="Search by course name or code..." value={courseSearch} onChange={(e) => setCourseSearch(e.target.value)} /></label>
+          <div className="selection-actions"><button className="mini" onClick={() => setFilteredSelection(true)} disabled={!courses.length}>Select visible</button><button className="mini" onClick={() => setFilteredSelection(false)} disabled={!courses.length}>Clear visible</button></div>
+        </div>
+        <div className="course-manager-meta"><span><strong>{selectedCourses.size}</strong> selected</span><span>{filteredCourses.length} shown</span>{assignmentsDirty && <span className="unsaved-dot">Unsaved changes</span>}</div>
+        <div className="course-checklist">
+          {filteredCourses.map((course) => <label className={`course-check-card ${selectedCourses.has(course.id) ? "selected" : ""}`} key={course.id}>
+            <input type="checkbox" checked={selectedCourses.has(course.id)} onChange={() => toggleCourse(course.id)} />
+            <span className="custom-check" aria-hidden="true">✓</span>
+            <span className="course-check-copy"><strong>{course.course_name}</strong><small>{course.course_code} · Source: {course.academic_level ? `Level ${course.academic_level}` : "GEN/FEL"}</small></span>
+          </label>)}
+          {!filteredCourses.length && <div className="empty-course-search">{courses.length ? "No courses match your search." : "Connect with the Admin API key to load courses."}</div>}
+        </div>
+        <div className="course-manager-footer"><span className={saveState ? "save-success" : ""}>{saveState || (assignmentsDirty ? "Review your selection, then save." : "All changes saved.")}</span><button className="btn" onClick={saveLevelCourses} disabled={!apiKey || busy || !assignmentsDirty}>{busy ? "Saving..." : `Save Level ${courseLevel}`}</button></div>
       </section>
       <section className="panel"><h2>Course Catalog ({courses.length})</h2><div className="admin-course-table"><table><thead><tr><th>Code</th><th>Name</th><th>Level</th><th>Last Sync</th></tr></thead><tbody>{courses.map((course) => <tr key={course.id}><td>{course.course_code}</td><td>{course.course_name}</td><td>{course.academic_level || "GEN/FEL"}</td><td>{course.last_synced_at || "—"}</td></tr>)}</tbody></table></div></section>
     </main>
