@@ -29,8 +29,9 @@ function validScope(value) { return value === "all" || value === "general" || /^
 app.get("/api/schedules", (req, res) => {
   const scope = String(req.query.level || "3");
   if (!validScope(scope)) return res.status(400).json({ error: "Invalid level" });
-  const where = scope === "all" ? "c.is_active=1" : scope === "general" ? "c.is_active=1 AND c.academic_level IS NULL" : "c.is_active=1 AND EXISTS (SELECT 1 FROM dulms_course_level_links l WHERE l.course_id=c.id AND l.academic_level=?)";
-  const params = scope === "all" || scope === "general" ? [] : [Number(scope)];
+  const configured = /^[1-5]$/.test(scope) ? db.prepare("SELECT 1 FROM dulms_course_level_links WHERE course_id=0 AND academic_level=?").get(Number(scope)) : null;
+  const where = scope === "all" ? "c.is_active=1" : scope === "general" ? "c.is_active=1 AND c.academic_level IS NULL" : configured ? "c.is_active=1 AND EXISTS (SELECT 1 FROM dulms_course_level_links l WHERE l.course_id=c.id AND l.academic_level=?)" : "c.is_active=1 AND (c.academic_level=? OR EXISTS (SELECT 1 FROM dulms_course_level_links l WHERE l.course_id=c.id AND l.academic_level=?))";
+  const params = scope === "all" || scope === "general" ? [] : configured ? [Number(scope)] : [Number(scope), Number(scope)];
   const courses = db.prepare(`SELECT * FROM dulms_courses c WHERE ${where} ORDER BY c.course_code`).all(...params);
   const output = courses.map((course) => ({
     id: course.normalized_course_code, courseId: course.source_course_id, code: course.course_code, name: course.course_name,
@@ -45,7 +46,8 @@ app.get("/api/schedules", (req, res) => {
 
 app.get("/api/admin/dulms-courses", adminOnly, (req, res) => {
   const courses = db.prepare("SELECT c.id,c.source_course_id,c.course_code,c.course_name,c.category,c.academic_level,c.credit_hours,c.is_active,c.last_synced_at,GROUP_CONCAT(l.academic_level) AS linked_levels FROM dulms_courses c LEFT JOIN dulms_course_level_links l ON l.course_id=c.id GROUP BY c.id ORDER BY c.academic_level,c.course_code").all();
-  res.json(courses.map((course) => ({ ...course, linkedLevels: course.linked_levels ? course.linked_levels.split(',').map(Number) : [] })));
+  const configured = new Set(db.prepare("SELECT academic_level FROM dulms_course_level_links WHERE course_id=0").all().map((row) => Number(row.academic_level)));
+  res.json(courses.map((course) => { const raw = course.linked_levels ? course.linked_levels.split(',').map(Number) : []; return { ...course, linkedLevels: [1, 2, 3, 4, 5].filter((level) => configured.has(level) ? raw.includes(level) : raw.includes(level) || Number(course.academic_level) === level) }; }));
 });
 
 app.put("/api/admin/levels/:level/courses", adminOnly, (req, res) => {
@@ -63,6 +65,7 @@ app.put("/api/admin/levels/:level/courses", adminOnly, (req, res) => {
   try {
     db.prepare("DELETE FROM dulms_course_level_links WHERE academic_level=?").run(level);
     const insert = db.prepare("INSERT INTO dulms_course_level_links(course_id,academic_level) VALUES (?,?)");
+    insert.run(0, level);
     courseIds.forEach((courseId) => insert.run(courseId, level));
     db.exec("COMMIT");
     res.json({ ok: true, level, assigned: courseIds.length });
@@ -105,8 +108,9 @@ app.get("/api/admin/dulms-sync/:runId", adminOnly, (req, res) => {
 app.get("/api/admin/schedules/export/pdf", adminOnly, (req, res) => {
   const level = String(req.query.level || "");
   if (!validScope(level) || level === "all") return res.status(400).json({ error: "Choose one valid level" });
-  const where = level === "general" ? "c.academic_level IS NULL" : "EXISTS (SELECT 1 FROM dulms_course_level_links l WHERE l.course_id=c.id AND l.academic_level=?)";
-  const params = level === "general" ? [] : [Number(level)];
+  const configured = /^[1-5]$/.test(level) ? db.prepare("SELECT 1 FROM dulms_course_level_links WHERE course_id=0 AND academic_level=?").get(Number(level)) : null;
+  const where = level === "general" ? "c.academic_level IS NULL" : configured ? "EXISTS (SELECT 1 FROM dulms_course_level_links l WHERE l.course_id=c.id AND l.academic_level=?)" : "(c.academic_level=? OR EXISTS (SELECT 1 FROM dulms_course_level_links l WHERE l.course_id=c.id AND l.academic_level=?))";
+  const params = level === "general" ? [] : configured ? [Number(level)] : [Number(level), Number(level)];
   const courses = db.prepare(`SELECT * FROM dulms_courses c WHERE c.is_active=1 AND ${where} ORDER BY c.course_code`).all(...params);
   const ids = courses.map((course) => course.id);
   const sessions = ids.length ? db.prepare(`SELECT s.*,c.course_code,c.course_name FROM dulms_sessions s JOIN dulms_courses c ON c.id=s.course_id WHERE s.is_active=1 AND s.course_id IN (${ids.map(() => "?").join(",")})`).all(...ids) : [];
