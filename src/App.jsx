@@ -8,6 +8,7 @@ import {
   pairedSectionLabel,
   parseSectionGroupName,
 } from "./lib/groupIdentity";
+import { findSharedSubgroupPrefixes, subgroupSessionAppliesToRow } from "./lib/combinedSchedule";
 import {
   DAYS,
   TIME_SLOTS,
@@ -951,7 +952,7 @@ function AppBody() {
         label: track.label,
         prefix: track.prefix,
         sections: track.sections,
-        sectionSet: new Set(track.sections.map((s) => String(s).trim().toUpperCase())),
+        sectionKeys: new Set(track.sections.map(groupTrackKey).filter(Boolean)),
         sortPrefix: firstParsed?.prefix || track.prefix || "",
         sortNumber: firstParsed?.number ?? 999,
       };
@@ -964,6 +965,7 @@ function AppBody() {
     });
     return tracks;
   }, [baseTrackOptions]);
+  const sharedSubgroupPrefixes = useMemo(() => findSharedSubgroupPrefixes(courses), [courses]);
   const dayExplorerSessionsOnly = useMemo(
     () => (dayExplorer === "all" ? [] : tableSessions.filter((s) => normalizeDay(s) === dayExplorer)),
     [tableSessions, dayExplorer]
@@ -974,9 +976,8 @@ function AppBody() {
 
     for (const session of dayExplorerSessionsOnly) {
       if (isSubgroup(session.Type)) {
-        const g = String(session.GroupName || "").trim().toUpperCase();
         for (const row of daySectionRows) {
-          if (row.sectionSet.has(g)) {
+          if (subgroupSessionAppliesToRow(session, row, sharedSubgroupPrefixes)) {
             map.get(row.id).push(session);
           }
         }
@@ -1013,7 +1014,7 @@ function AppBody() {
     }
 
     return map;
-  }, [daySectionRows, dayExplorer, dayExplorerSessionsOnly]);
+  }, [daySectionRows, dayExplorer, dayExplorerSessionsOnly, sharedSubgroupPrefixes]);
   const dayExplorerTableModel = useMemo(() => {
     if (dayExplorer === "all") return null;
 
