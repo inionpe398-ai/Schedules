@@ -2440,6 +2440,96 @@ function AppBody() {
     }
   }
 
+
+  function openQuickEditor(session) {
+    if (!session?.courseId) {
+      showNotice("error", "Quick Edit", "This session has no course identifier.");
+      return;
+    }
+    const key = session.editSourceKey || sessionEditKey(session.courseId, session);
+    const sourceCourse = staffLookupCourses.find((course) => String(course.id) === String(session.courseId))
+      || courses.find((course) => String(course.id) === String(session.courseId));
+    const source = sourceCourse?.sessions?.find((raw) => sessionEditKey(sourceCourse.id, raw) === key) || session;
+    setQuickEditorSession({ key, source, displayed: session });
+    setQuickDraft({
+      Staff: String(session.Staff || ""),
+      ClassRoomName: String(session.ClassRoomName || ""),
+      GroupName: String(session.GroupName || ""),
+      DayWeekName: normalizeDay(session),
+      Time: String(session.Time || ""),
+    });
+    setShowQuickEditor(true);
+  }
+
+  function applyQuickTimePreset(index) {
+    if (!quickEditorSession || !quickDraft) return;
+    const start = Number(index);
+    const span = slotRange(quickEditorSession.displayed, currentTimeSlots)?.span
+      || slotRange(quickEditorSession.source, currentTimeSlots)?.span
+      || forcedSpanByType(quickEditorSession.source.Type);
+    if (!Number.isInteger(start) || start < 0 || start + span > currentTimeSlots.length) return;
+    const from = toSecondsHHMM(currentTimeSlots[start].split("-")[0].trim());
+    const to = toSecondsHHMM(currentTimeSlots[start + span - 1].split("-")[1].trim());
+    setQuickDraft((previous) => ({ ...previous, Time: `${from} - ${to}` }));
+  }
+
+  function saveQuickEdit() {
+    if (!quickEditorSession || !quickDraft) return;
+    const { key, source, displayed } = quickEditorSession;
+    const day = String(quickDraft.DayWeekName || "").trim();
+    const time = String(quickDraft.Time || "").trim();
+    if (!DAYS.includes(day)) {
+      showNotice("error", "Quick Edit", "Choose a valid timetable day.");
+      return;
+    }
+    if (!/^\d{1,2}:[0-5]\d(?::[0-5]\d)?\s*-\s*\d{1,2}:[0-5]\d(?::[0-5]\d)?$/.test(time)) {
+      showNotice("error", "Quick Edit", "Use a time range such as 08:45 - 10:15.");
+      return;
+    }
+    const parts = time.split("-").map((value) => value.trim());
+    if (parts.some((value) => Number(value.split(":")[0]) > 23) || timeToMinutes(parts[0]) >= timeToMinutes(parts[1])) {
+      showNotice("error", "Quick Edit", "The ending time must be later than the starting time.");
+      return;
+    }
+    const next = { ...displayed, ...quickDraft, Time: time, DayWeekName: day, DayWeek: DAY_WEEK_BY_NAME[day] };
+    if (!slotRange(next, currentTimeSlots)) {
+      showNotice("error", "Quick Edit", "Choose a time within the selected timetable slots.");
+      return;
+    }
+
+    const fields = ["Staff", "ClassRoomName", "GroupName", "Time"];
+    const patch = {};
+    for (const field of fields) {
+      const nextValue = String(quickDraft[field] || "").trim();
+      if (nextValue !== String(source[field] || "").trim()) patch[field] = nextValue;
+    }
+    if (day !== normalizeDay(source)) {
+      patch.DayWeekName = day;
+      patch.DayWeek = DAY_WEEK_BY_NAME[day];
+    }
+    setQuickEdits((previous) => {
+      const updated = { ...previous };
+      if (Object.keys(patch).length) updated[key] = patch;
+      else delete updated[key];
+      return updated;
+    });
+    setShowQuickEditor(false);
+    showNotice("success", "Schedule Updated", Object.keys(patch).length
+      ? "Saved on this browser. Changes appear in the schedule and staff search."
+      : "Restored the original session details.");
+  }
+
+  function resetQuickEdit() {
+    if (!quickEditorSession) return;
+    setQuickEdits((previous) => {
+      const updated = { ...previous };
+      delete updated[quickEditorSession.key];
+      return updated;
+    });
+    setShowQuickEditor(false);
+    showNotice("success", "Quick Edit", "Original session details restored.");
+  }
+
   return (
     <div className={`app ${tableOnly ? "table-only" : ""}`}>
       {error && <div className="error">{error}</div>}
