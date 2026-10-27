@@ -3,7 +3,7 @@ import { DAYS, normalizeDay } from "./time.js";
 const EDITABLE_FIELDS = ["Staff", "ClassRoomName", "GroupName", "Time", "DayWeekName"];
 
 export function sessionEditKey(courseId, session) {
-  return `${courseId}|${session.GroupId}|${session.DayWeek}|${session.IntervalId || ""}|${session.NameEn || ""}`;
+  return `${courseId}|${session.GroupId}|${session.DayWeek}|${session.IntervalId || ""}|${session.NameEn || ""}|${session.Time || ""}`;
 }
 
 export function normalizeStaffTerm(value) {
