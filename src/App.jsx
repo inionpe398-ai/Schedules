@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { loadCourses } from "./lib/data";
+import { applyQuickEdit, findStaffSessions, listStaffNames, sanitizeQuickEdits, sessionEditKey } from "./lib/staffSchedule.js";
 import {
   extractLecturePrefix,
   extractSectionPrefix,
@@ -29,6 +30,7 @@ const REGISTER_PRESETS_KEY = "scheduleRegisterPresetsV1";
 const SHARED_TRACK_OVERRIDES_KEY = "scheduleSharedTrackOverridesV1";
 const CUSTOM_TRACK_OPTIONS_KEY = "scheduleCustomTrackOptionsV1";
 const TRACK_OVERRIDES_KEY = "scheduleTrackOverridesV1";
+const QUICK_EDITS_KEY = "scheduleQuickSessionEditsV1";
 const REMOVED_MODIFIED_TRACK_IDS_KEY = "scheduleRemovedModifiedTrackIdsV1";
 const LATE_THRESHOLD_MINUTES = 16 * 60 + 15;
 const MAX_PLAN_SEARCH_LIMIT = 20000;
@@ -438,6 +440,13 @@ function AppBody() {
   const [removedModifiedTrackIds, setRemovedModifiedTrackIds] = useState([]);
   const [isHydrated, setIsHydrated] = useState(false);
   const [showModifyPanel, setShowModifyPanel] = useState(false);
+  const [staffSearch, setStaffSearch] = useState("");
+  const [staffCatalog, setStaffCatalog] = useState(null);
+  const [staffCatalogStatus, setStaffCatalogStatus] = useState("loading");
+  const [quickEdits, setQuickEdits] = useState({});
+  const [quickEditorSession, setQuickEditorSession] = useState(null);
+  const [quickDraft, setQuickDraft] = useState(null);
+  const [showQuickEditor, setShowQuickEditor] = useState(false);
   const [modifyMode, setModifyMode] = useState("regular");
   const [modifyTrackId, setModifyTrackId] = useState("");
   const [modifySessionKey, setModifySessionKey] = useState("");
@@ -514,6 +523,12 @@ function AppBody() {
         }
         setTrackOverrides(sanitizeTrackOverrides(rawTrackOverrides));
 
+        try {
+          setQuickEdits(sanitizeQuickEdits(JSON.parse(localStorage.getItem(QUICK_EDITS_KEY) || "{}")));
+        } catch {
+          setQuickEdits({});
+        }
+
         let rawRemovedTrackIds = [];
         try {
           const savedRemovedTrackIds = localStorage.getItem(REMOVED_MODIFIED_TRACK_IDS_KEY);
@@ -559,6 +574,37 @@ function AppBody() {
     if (!isHydrated) return;
     localStorage.setItem(TRACK_OVERRIDES_KEY, JSON.stringify(trackOverrides));
   }, [trackOverrides, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(QUICK_EDITS_KEY, JSON.stringify(quickEdits));
+  }, [quickEdits, isHydrated]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/schedules?level=all", { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error("All-level lookup unavailable");
+        return response.json();
+      })
+      .then((payload) => {
+        if (cancelled) return;
+        if (!Array.isArray(payload.courses) || !payload.courses.length) throw new Error("Empty catalog");
+        setStaffCatalog(payload.courses);
+        setStaffCatalogStatus("all");
+      })
+      .catch(() => {
+        if (!cancelled) setStaffCatalogStatus("current");
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!showQuickEditor) return undefined;
+    const onKeyDown = (event) => { if (event.key === "Escape") setShowQuickEditor(false); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showQuickEditor]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -702,6 +748,12 @@ function AppBody() {
   }, [selectedCourseId, currentLectureId, currentSubgroupId]);
 
   const registeredSessions = useMemo(() => flattenSessions(coursesById, registrations), [coursesById, registrations]);
+  const staffLookupCourses = staffCatalog?.length ? staffCatalog : courses;
+  const staffNames = useMemo(() => listStaffNames(staffLookupCourses, quickEdits), [staffLookupCourses, quickEdits]);
+  const staffSearchActive = Boolean(staffSearch.trim());
+  const staffSessions = useMemo(() => findStaffSessions(staffLookupCourses, staffSearch, quickEdits), [staffLookupCourses, staffSearch, quickEdits]);
+  const roomPresets = useMemo(() => [...new Set(staffLookupCourses.flatMap(course => (course.sessions || []).map(s => String(s.ClassRoomName || "").trim())).filter(Boolean))].sort(), [staffLookupCourses]);
+  const groupPresets = useMemo(() => [...new Set(staffLookupCourses.flatMap(course => (course.sessions || []).map(s => String(s.GroupName || "").trim())).filter(Boolean))].sort(), [staffLookupCourses]);
 
   const previewSessions = useMemo(() => {
     const out = [];
@@ -725,9 +777,10 @@ function AppBody() {
     const out = [];
     for (const course of courses) {
       for (const session of course.sessions) {
-        if (normalizeDay(session) !== dayExplorer) continue;
+        const adjusted = applyQuickEdit(session, course.id, quickEdits);
+        if (normalizeDay(adjusted) !== dayExplorer) continue;
         out.push({
-          ...session,
+          ...adjusted,
           courseId: course.id,
           courseName: course.name,
           source: "day-explorer",
@@ -735,7 +788,7 @@ function AppBody() {
       }
     }
     return out;
-  }, [courses, dayExplorer]);
+  }, [courses, dayExplorer, quickEdits]);
 
   const combinedDaysWithSessions = useMemo(() => {
     const activeDays = new Set();
@@ -876,9 +929,11 @@ function AppBody() {
   }, [plannerPreviewPlan, coursesById]);
 
   const tableSessions = useMemo(() => {
-    const all = plannerPreviewActive
-      ? [...plannerPreviewSessions]
-      : [...registeredSessions, ...globalTrackSessions, ...previewSessions, ...dayExplorerSessions];
+    const all = staffSearchActive
+      ? [...staffSessions]
+      : plannerPreviewActive
+        ? [...plannerPreviewSessions]
+        : [...registeredSessions, ...globalTrackSessions, ...previewSessions, ...dayExplorerSessions];
     const seen = new Set();
     const output = [];
 
@@ -887,7 +942,7 @@ function AppBody() {
       let isModified = Boolean(s.isModified);
       let modifiedReason = s.modifiedReason || "";
 
-      normalized = { ...normalized, isModified, modifiedReason };
+      normalized = applyQuickEdit({ ...normalized, isModified, modifiedReason }, s.courseId, quickEdits, s.editSourceKey || s.trackSessionKey || sessionEditKey(s.courseId, s));
       const key = `${normalized.courseId || normalized.courseName}|${normalized.GroupId}|${normalized.DayWeek}|${normalized.Time}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -902,6 +957,9 @@ function AppBody() {
     globalTrackSessions,
     previewSessions,
     dayExplorerSessions,
+    staffSearchActive,
+    staffSessions,
+    quickEdits,
   ]);
   const registeredCount = registrations.length;
   const activePreviewCount =
@@ -914,6 +972,7 @@ function AppBody() {
   const hasBuiltSchedule = tableSessions.length > 0 || Boolean(globalTrackPick);
 
   const printTitle = useMemo(() => {
+    if (staffSearchActive) return `${staffSearch.trim()} · Staff Schedule`;
     if (dayExplorer !== "all") {
       return `${dayExplorer} · Combined Sections Schedule`;
     }
@@ -924,7 +983,7 @@ function AppBody() {
       return `${selectedCourse.name} Sections`;
     }
     return "Weekly Schedule";
-  }, [dayExplorer, globalTrack, selectedCourse]);
+  }, [dayExplorer, globalTrack, selectedCourse, staffSearchActive, staffSearch]);
 
   const currentTrackLabel = useMemo(() => {
     if (globalTrack?.selectedSubgroup) return globalTrack.selectedSubgroup;
