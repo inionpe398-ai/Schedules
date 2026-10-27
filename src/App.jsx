@@ -2510,7 +2510,7 @@ function AppBody() {
       patch.DayWeekName = day;
       patch.DayWeek = DAY_WEEK_BY_NAME[day];
     }
-    if ((displayed.source === "track" || displayed.source === "registered" || displayed.source === "staff")
+    if (!staffSearchActive && (displayed.source === "track" || displayed.source === "registered")
       && (day !== normalizeDay(displayed) || time !== String(displayed.Time || "").trim())) {
       const proposedSessions = tableSessions.map((entry) => {
         const entryKey = entry.editSourceKey || sessionEditKey(entry.courseId, entry);
