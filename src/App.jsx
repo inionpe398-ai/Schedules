@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { loadCourses } from "./lib/data";
+import { applyQuickEdit, findStaffSessions, listStaffNames, sanitizeQuickEdits, sessionEditKey } from "./lib/staffSchedule.js";
 import {
   extractLecturePrefix,
   extractSectionPrefix,
@@ -29,6 +30,7 @@ const REGISTER_PRESETS_KEY = "scheduleRegisterPresetsV1";
 const SHARED_TRACK_OVERRIDES_KEY = "scheduleSharedTrackOverridesV1";
 const CUSTOM_TRACK_OPTIONS_KEY = "scheduleCustomTrackOptionsV1";
 const TRACK_OVERRIDES_KEY = "scheduleTrackOverridesV1";
+const QUICK_EDITS_KEY = "scheduleQuickSessionEditsV1";
 const REMOVED_MODIFIED_TRACK_IDS_KEY = "scheduleRemovedModifiedTrackIdsV1";
 const LATE_THRESHOLD_MINUTES = 16 * 60 + 15;
 const MAX_PLAN_SEARCH_LIMIT = 20000;
@@ -438,6 +440,15 @@ function AppBody() {
   const [removedModifiedTrackIds, setRemovedModifiedTrackIds] = useState([]);
   const [isHydrated, setIsHydrated] = useState(false);
   const [showModifyPanel, setShowModifyPanel] = useState(false);
+  const [staffSearch, setStaffSearch] = useState("");
+  const [staffCatalog, setStaffCatalog] = useState(null);
+  const [staffCatalogStatus, setStaffCatalogStatus] = useState("idle");
+  const staffLookupStarted = useRef(false);
+  const [quickEdits, setQuickEdits] = useState({});
+  const [quickEditorSession, setQuickEditorSession] = useState(null);
+  const [quickDraft, setQuickDraft] = useState(null);
+  const [quickError, setQuickError] = useState("");
+  const [showQuickEditor, setShowQuickEditor] = useState(false);
   const [modifyMode, setModifyMode] = useState("regular");
   const [modifyTrackId, setModifyTrackId] = useState("");
   const [modifySessionKey, setModifySessionKey] = useState("");
@@ -514,6 +525,12 @@ function AppBody() {
         }
         setTrackOverrides(sanitizeTrackOverrides(rawTrackOverrides));
 
+        try {
+          setQuickEdits(sanitizeQuickEdits(JSON.parse(localStorage.getItem(QUICK_EDITS_KEY) || "{}")));
+        } catch {
+          setQuickEdits({});
+        }
+
         let rawRemovedTrackIds = [];
         try {
           const savedRemovedTrackIds = localStorage.getItem(REMOVED_MODIFIED_TRACK_IDS_KEY);
@@ -559,6 +576,35 @@ function AppBody() {
     if (!isHydrated) return;
     localStorage.setItem(TRACK_OVERRIDES_KEY, JSON.stringify(trackOverrides));
   }, [trackOverrides, isHydrated]);
+
+  useEffect(() => {
+    if (!isHydrated) return;
+    localStorage.setItem(QUICK_EDITS_KEY, JSON.stringify(quickEdits));
+  }, [quickEdits, isHydrated]);
+
+  useEffect(() => {
+    if (!staffSearch.trim() || staffLookupStarted.current) return;
+    staffLookupStarted.current = true;
+    setStaffCatalogStatus("loading");
+    fetch("/api/schedules?level=all", { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error("All-level lookup unavailable");
+        return response.json();
+      })
+      .then((payload) => {
+        if (!Array.isArray(payload.courses) || !payload.courses.length) throw new Error("Empty catalog");
+        setStaffCatalog(payload.courses);
+        setStaffCatalogStatus("all");
+      })
+      .catch(() => setStaffCatalogStatus("current"));
+  }, [staffSearch]);
+
+  useEffect(() => {
+    if (!showQuickEditor) return undefined;
+    const onKeyDown = (event) => { if (event.key === "Escape") setShowQuickEditor(false); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [showQuickEditor]);
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -702,6 +748,12 @@ function AppBody() {
   }, [selectedCourseId, currentLectureId, currentSubgroupId]);
 
   const registeredSessions = useMemo(() => flattenSessions(coursesById, registrations), [coursesById, registrations]);
+  const staffLookupCourses = staffCatalog?.length ? staffCatalog : courses;
+  const staffNames = useMemo(() => listStaffNames(staffLookupCourses, quickEdits), [staffLookupCourses, quickEdits]);
+  const staffSearchActive = Boolean(staffSearch.trim());
+  const staffSessions = useMemo(() => findStaffSessions(staffLookupCourses, staffSearch, quickEdits), [staffLookupCourses, staffSearch, quickEdits]);
+  const roomPresets = useMemo(() => [...new Set(staffLookupCourses.flatMap(course => (course.sessions || []).map(s => String(s.ClassRoomName || "").trim())).filter(Boolean))].sort(), [staffLookupCourses]);
+  const groupPresets = useMemo(() => [...new Set(staffLookupCourses.flatMap(course => (course.sessions || []).map(s => String(s.GroupName || "").trim())).filter(Boolean))].sort(), [staffLookupCourses]);
 
   const previewSessions = useMemo(() => {
     const out = [];
@@ -725,9 +777,10 @@ function AppBody() {
     const out = [];
     for (const course of courses) {
       for (const session of course.sessions) {
-        if (normalizeDay(session) !== dayExplorer) continue;
+        const adjusted = applyQuickEdit(session, course.id, quickEdits);
+        if (normalizeDay(adjusted) !== dayExplorer) continue;
         out.push({
-          ...session,
+          ...adjusted,
           courseId: course.id,
           courseName: course.name,
           source: "day-explorer",
@@ -735,7 +788,7 @@ function AppBody() {
       }
     }
     return out;
-  }, [courses, dayExplorer]);
+  }, [courses, dayExplorer, quickEdits]);
 
   const combinedDaysWithSessions = useMemo(() => {
     const activeDays = new Set();
@@ -837,9 +890,10 @@ function AppBody() {
 
     for (const course of sectionPresetCourses) {
       for (const raw of course.sessions) {
-        const gName = groupTrackKey(raw.GroupName);
-        const matchesLecture = isLecture(raw.Type) && extractLecturePrefix(gName) === prefixUpper;
-        const matchesSubgroup = isSubgroup(raw.Type) && sectionSet.has(gName);
+        const quickAdjusted = applyQuickEdit(raw, course.id, quickEdits);
+        const gName = groupTrackKey(quickAdjusted.GroupName);
+        const matchesLecture = isLecture(quickAdjusted.Type) && extractLecturePrefix(gName) === prefixUpper;
+        const matchesSubgroup = isSubgroup(quickAdjusted.Type) && sectionSet.has(gName);
         if (!matchesLecture && !matchesSubgroup) continue;
 
         const adjusted = applyTrackSpecificAdjustments(raw, course.id, trackById.get(trackId), trackOverrideMap);
@@ -853,12 +907,13 @@ function AppBody() {
           isModified,
           modifiedReason,
           trackSessionKey: key,
+          editSourceKey: sessionEditKey(course.id, raw),
         });
       }
     }
 
     return out;
-  }, [globalTrack, sectionPresetCourses, trackOverrides, trackById]);
+  }, [globalTrack, sectionPresetCourses, trackOverrides, trackById, quickEdits]);
 
   const plannerPreviewPlan = useMemo(
     () => damagePlans.find((plan) => plan.id === plannerPreviewPlanId) || null,
@@ -876,9 +931,11 @@ function AppBody() {
   }, [plannerPreviewPlan, coursesById]);
 
   const tableSessions = useMemo(() => {
-    const all = plannerPreviewActive
-      ? [...plannerPreviewSessions]
-      : [...registeredSessions, ...globalTrackSessions, ...previewSessions, ...dayExplorerSessions];
+    const all = staffSearchActive
+      ? [...staffSessions]
+      : plannerPreviewActive
+        ? [...plannerPreviewSessions]
+        : [...registeredSessions, ...globalTrackSessions, ...previewSessions, ...dayExplorerSessions];
     const seen = new Set();
     const output = [];
 
@@ -887,7 +944,7 @@ function AppBody() {
       let isModified = Boolean(s.isModified);
       let modifiedReason = s.modifiedReason || "";
 
-      normalized = { ...normalized, isModified, modifiedReason };
+      normalized = applyQuickEdit({ ...normalized, isModified, modifiedReason }, s.courseId, quickEdits, s.editSourceKey || s.trackSessionKey || sessionEditKey(s.courseId, s));
       const key = `${normalized.courseId || normalized.courseName}|${normalized.GroupId}|${normalized.DayWeek}|${normalized.Time}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -902,6 +959,9 @@ function AppBody() {
     globalTrackSessions,
     previewSessions,
     dayExplorerSessions,
+    staffSearchActive,
+    staffSessions,
+    quickEdits,
   ]);
   const registeredCount = registrations.length;
   const activePreviewCount =
@@ -914,6 +974,7 @@ function AppBody() {
   const hasBuiltSchedule = tableSessions.length > 0 || Boolean(globalTrackPick);
 
   const printTitle = useMemo(() => {
+    if (staffSearchActive) return `${staffSearch.trim()} · Staff Schedule`;
     if (dayExplorer !== "all") {
       return `${dayExplorer} · Combined Sections Schedule`;
     }
@@ -924,7 +985,7 @@ function AppBody() {
       return `${selectedCourse.name} Sections`;
     }
     return "Weekly Schedule";
-  }, [dayExplorer, globalTrack, selectedCourse]);
+  }, [dayExplorer, globalTrack, selectedCourse, staffSearchActive, staffSearch]);
 
   const currentTrackLabel = useMemo(() => {
     if (globalTrack?.selectedSubgroup) return globalTrack.selectedSubgroup;
@@ -2380,6 +2441,109 @@ function AppBody() {
     }
   }
 
+
+  function openQuickEditor(session) {
+    if (!session?.courseId) {
+      showNotice("error", "Quick Edit", "This session has no course identifier.");
+      return;
+    }
+    const key = session.editSourceKey || sessionEditKey(session.courseId, session);
+    const sourceCourse = staffLookupCourses.find((course) => String(course.id) === String(session.courseId))
+      || courses.find((course) => String(course.id) === String(session.courseId));
+    const source = sourceCourse?.sessions?.find((raw) => sessionEditKey(sourceCourse.id, raw) === key) || session;
+    setQuickEditorSession({ key, source, displayed: session });
+    setQuickError("");
+    setQuickDraft({
+      Staff: String(session.Staff || ""),
+      ClassRoomName: String(session.ClassRoomName || ""),
+      GroupName: String(session.GroupName || ""),
+      DayWeekName: normalizeDay(session),
+      Time: String(session.Time || ""),
+    });
+    setShowQuickEditor(true);
+  }
+
+  function applyQuickTimePreset(index) {
+    if (!quickEditorSession || !quickDraft) return;
+    const start = Number(index);
+    const span = slotRange(quickEditorSession.displayed, currentTimeSlots)?.span
+      || slotRange(quickEditorSession.source, currentTimeSlots)?.span
+      || forcedSpanByType(quickEditorSession.source.Type);
+    if (!Number.isInteger(start) || start < 0 || start + span > currentTimeSlots.length) return;
+    const from = toSecondsHHMM(currentTimeSlots[start].split("-")[0].trim());
+    const to = toSecondsHHMM(currentTimeSlots[start + span - 1].split("-")[1].trim());
+    setQuickDraft((previous) => ({ ...previous, Time: `${from} - ${to}` }));
+  }
+
+  function saveQuickEdit() {
+    if (!quickEditorSession || !quickDraft) return;
+    setQuickError("");
+    const { key, source, displayed } = quickEditorSession;
+    const day = String(quickDraft.DayWeekName || "").trim();
+    const time = String(quickDraft.Time || "").trim();
+    if (!DAYS.includes(day)) {
+      setQuickError("Choose a valid timetable day.");
+      return;
+    }
+    if (!/^\d{1,2}:[0-5]\d(?::[0-5]\d)?\s*-\s*\d{1,2}:[0-5]\d(?::[0-5]\d)?$/.test(time)) {
+      setQuickError("Use a time range such as 08:45 - 10:15.");
+      return;
+    }
+    const parts = time.split("-").map((value) => value.trim());
+    if (parts.some((value) => Number(value.split(":")[0]) > 23) || timeToMinutes(parts[0]) >= timeToMinutes(parts[1])) {
+      setQuickError("The ending time must be later than the starting time.");
+      return;
+    }
+    const next = { ...displayed, ...quickDraft, Time: time, DayWeekName: day, DayWeek: DAY_WEEK_BY_NAME[day] };
+    if (!slotRange(next, currentTimeSlots)) {
+      setQuickError("Choose a time within the selected timetable slots.");
+      return;
+    }
+
+    const fields = ["Staff", "ClassRoomName", "GroupName", "Time"];
+    const patch = {};
+    for (const field of fields) {
+      const nextValue = String(quickDraft[field] || "").trim();
+      if (nextValue !== String(source[field] || "").trim()) patch[field] = nextValue;
+    }
+    if (day !== normalizeDay(source)) {
+      patch.DayWeekName = day;
+      patch.DayWeek = DAY_WEEK_BY_NAME[day];
+    }
+    if (!staffSearchActive && (displayed.source === "track" || displayed.source === "registered")
+      && (day !== normalizeDay(displayed) || time !== String(displayed.Time || "").trim())) {
+      const proposedSessions = tableSessions.map((entry) => {
+        const entryKey = entry.editSourceKey || sessionEditKey(entry.courseId, entry);
+        return entryKey === key ? { ...entry, ...next } : entry;
+      });
+      if (countSessionConflicts(proposedSessions, currentTimeSlots) > countSessionConflicts(tableSessions, currentTimeSlots)) {
+        setQuickError("That change introduces a timetable overlap. Choose another day or time.");
+        return;
+      }
+    }
+    setQuickEdits((previous) => {
+      const updated = { ...previous };
+      if (Object.keys(patch).length) updated[key] = patch;
+      else delete updated[key];
+      return updated;
+    });
+    setShowQuickEditor(false);
+    showNotice("success", "Schedule Updated", Object.keys(patch).length
+      ? "Saved on this browser. Changes appear in the schedule and staff search."
+      : "Restored the original session details.");
+  }
+
+  function resetQuickEdit() {
+    if (!quickEditorSession) return;
+    setQuickEdits((previous) => {
+      const updated = { ...previous };
+      delete updated[quickEditorSession.key];
+      return updated;
+    });
+    setShowQuickEditor(false);
+    showNotice("success", "Quick Edit", "Original session details restored.");
+  }
+
   return (
     <div className={`app ${tableOnly ? "table-only" : ""}`}>
       {error && <div className="error">{error}</div>}
@@ -2630,7 +2794,7 @@ function AppBody() {
                   })
                 }
               >
-                Modify
+                Advanced Modify
               </button>
               <button className="btn secondary" type="button" onClick={toggleFullscreen}>
                 Full Screen
@@ -2652,6 +2816,40 @@ function AppBody() {
               </button>
             </div>
           </div>
+          <div className="staff-search-bar" role="search" aria-label="Find a doctor's weekly schedule">
+            <div className="staff-search-copy">
+              <strong>Search Doctor / Staff Schedule</strong>
+              <span>Find all their lectures and sections, then click any session to edit it.</span>
+            </div>
+            <div className="staff-search-controls">
+              <input
+                type="search"
+                aria-label="Search doctor or staff name"
+                list="schedule-staff-options"
+                placeholder="Enter a doctor or staff name..."
+                value={staffSearch}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setStaffSearch(value);
+                  if (value.trim()) setDayExplorer("all");
+                }}
+              />
+              <datalist id="schedule-staff-options">
+                {staffNames.map((staff) => <option key={staff} value={staff} />)}
+              </datalist>
+              {staffSearchActive && (
+                <button type="button" className="mini" onClick={() => setStaffSearch("")}>Clear Search</button>
+              )}
+            </div>
+            <span className="staff-search-status" aria-live="polite">
+              {staffSearchActive
+                ? `${staffSessions.length} matching sessions · ${staffCatalogStatus === "all" ? "All levels" : staffCatalogStatus === "loading" ? "Loading all levels..." : "Current level only (all-level API unavailable)"}`
+                : `${staffNames.length} staff names · ${staffCatalogStatus === "all" ? "All levels available" : staffCatalogStatus === "loading" ? "Loading..." : "Current level"}`}
+            </span>
+          </div>
+          {staffSearchActive && staffSessions.length === 0 && staffCatalogStatus !== "loading" && (
+            <div className="staff-search-empty" role="status">No matching sessions found. Try another spelling or a shorter part of the name.</div>
+          )}
           <div className="combined-tables-picker" aria-label="Combined section schedules">
             <div className="combined-tables-copy">
               <strong>Combined Section Tables</strong>
@@ -2725,6 +2923,91 @@ function AppBody() {
               )}
             </div>
           </div>
+
+          {showQuickEditor && (
+            <div
+              className="quick-edit-backdrop"
+              onMouseDown={(event) => { if (event.target === event.currentTarget) setShowQuickEditor(false); }}
+            >
+              <aside className="quick-edit-drawer" role="dialog" aria-modal="true" aria-label="Edit timetable session">
+                <div className="quick-edit-top">
+                  <div>
+                    <span className="quick-edit-eyebrow">QUICK EDIT</span>
+                    <h2>Edit Session</h2>
+                    <p>Change the details and press Save. No track or session picker required.</p>
+                  </div>
+                  <button type="button" className="quick-edit-close" aria-label="Close editor" onClick={() => setShowQuickEditor(false)}>×</button>
+                </div>
+                {quickEditorSession && quickDraft && (
+                  <form className="quick-edit-form" onSubmit={(event) => { event.preventDefault(); saveQuickEdit(); }}>
+                    <div className="quick-edit-summary">
+                      <strong>{quickEditorSession.displayed.courseName}</strong>
+                      <span>{groupLabelByType(quickEditorSession.displayed.Type)} · {quickEditorSession.displayed.GroupName || "Unknown group"}</span>
+                      <span>{quickEditorSession.displayed.Type || "Session"}</span>
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-staff">Doctor / Staff</label>
+                      <input id="quick-staff" list="schedule-staff-options" value={quickDraft.Staff}
+                        onChange={(event) => setQuickDraft((prev) => ({ ...prev, Staff: event.target.value }))}
+                        placeholder="Select or type a name" />
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-group">Group / Section</label>
+                      <input id="quick-group" list="quick-group-options" value={quickDraft.GroupName}
+                        onChange={(event) => setQuickDraft((prev) => ({ ...prev, GroupName: event.target.value }))} />
+                      <datalist id="quick-group-options">{groupPresets.map((group) => <option key={group} value={group} />)}</datalist>
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-room">Hall / Room</label>
+                      <input id="quick-room" list="quick-room-options" value={quickDraft.ClassRoomName}
+                        onChange={(event) => setQuickDraft((prev) => ({ ...prev, ClassRoomName: event.target.value }))}
+                        placeholder="Select or type a hall" />
+                      <datalist id="quick-room-options">{roomPresets.map((room) => <option key={room} value={room} />)}</datalist>
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-day">Day</label>
+                      <select id="quick-day" value={quickDraft.DayWeekName}
+                        onChange={(event) => setQuickDraft((prev) => ({ ...prev, DayWeekName: event.target.value }))}>
+                        {DAYS.map((day) => <option value={day} key={day}>{day}</option>)}
+                      </select>
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-time-preset">Start Time Preset</label>
+                      <select id="quick-time-preset" value="" onChange={(event) => applyQuickTimePreset(event.target.value)}>
+                        <option value="">Choose a time (keeps session duration)</option>
+                        {currentTimeSlots.map((slot, index) => {
+                          const span = slotRange(quickEditorSession.displayed, currentTimeSlots)?.span
+                            || slotRange(quickEditorSession.source, currentTimeSlots)?.span
+                            || forcedSpanByType(quickEditorSession.source.Type);
+                          if (index + span > currentTimeSlots.length) return null;
+                          return <option key={slot} value={index}>{formatSlotLabel(slot, timeFormat)}</option>;
+                        })}
+                      </select>
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-time">Time Range</label>
+                      <input id="quick-time" value={quickDraft.Time}
+                        onChange={(event) => setQuickDraft((prev) => ({ ...prev, Time: event.target.value }))}
+                        placeholder="08:45 - 10:15" />
+                      <small>Use an available timetable slot. The preset fills this automatically.</small>
+                    </div>
+                    {quickError && <div className="quick-edit-error" role="alert">{quickError}</div>}
+                    <div className="quick-edit-note">
+                      Saved locally in this browser. Original DULMS data and other users' schedules are not changed.
+                    </div>
+                    <div className="quick-edit-actions">
+                      <button type="button" className="btn secondary" onClick={() => setShowQuickEditor(false)}>Cancel</button>
+                      <button type="submit" className="btn">Save Changes</button>
+                    </div>
+                    {quickEdits[quickEditorSession.key] && (
+                      <button type="button" className="mini danger quick-reset" onClick={resetQuickEdit}>Restore original details</button>
+                    )}
+                  </form>
+                )}
+              </aside>
+            </div>
+          )}
+
           {showModifyPanel && (
             <div className="modify-panel">
               <div className="modify-row">
@@ -2899,6 +3182,11 @@ function AppBody() {
                         return (
                           <article
                             key={`${day}-${s.courseName}-${s.GroupId}-${idx}-${s.Time}`}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Edit ${s.courseName}, ${displayGroupNameInCard(s)}, ${normalizeDay(s)} ${s.Time}`}
+                            onClick={() => openQuickEditor(s)}
+                            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openQuickEditor(s); } }}
                             className={`lesson ${blockKindByType(s.Type)} ${
                               s.source === "preview" || s.source === "planner-preview" ? "preview" : ""
                             } ${
@@ -2959,11 +3247,11 @@ function AppBody() {
                               style={combinedCourseTheme(s)}
                               title={`${s.courseName} | ${displayGroupNameInCard(s)} | ${s.Time}`}
                             >
-                              <div className="sections-day-lesson-content">
+                              <button type="button" className="sections-day-lesson-content" onClick={() => openQuickEditor(s)} aria-label={`Edit ${s.courseName}, ${displayGroupNameInCard(s)}, ${normalizeDay(s)} ${s.Time}`}>
                                 <strong>{s.courseName}</strong>
                                 <span>{displayGroupNameInCard(s)}</span>
                                 <span>{s.ClassRoomName || "N/A"}</span>
-                              </div>
+                              </button>
                             </td>
                           );
                         }
