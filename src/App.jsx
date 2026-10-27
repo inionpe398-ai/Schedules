@@ -890,9 +890,10 @@ function AppBody() {
 
     for (const course of sectionPresetCourses) {
       for (const raw of course.sessions) {
-        const gName = groupTrackKey(raw.GroupName);
-        const matchesLecture = isLecture(raw.Type) && extractLecturePrefix(gName) === prefixUpper;
-        const matchesSubgroup = isSubgroup(raw.Type) && sectionSet.has(gName);
+        const quickAdjusted = applyQuickEdit(raw, course.id, quickEdits);
+        const gName = groupTrackKey(quickAdjusted.GroupName);
+        const matchesLecture = isLecture(quickAdjusted.Type) && extractLecturePrefix(gName) === prefixUpper;
+        const matchesSubgroup = isSubgroup(quickAdjusted.Type) && sectionSet.has(gName);
         if (!matchesLecture && !matchesSubgroup) continue;
 
         const adjusted = applyTrackSpecificAdjustments(raw, course.id, trackById.get(trackId), trackOverrideMap);
@@ -912,7 +913,7 @@ function AppBody() {
     }
 
     return out;
-  }, [globalTrack, sectionPresetCourses, trackOverrides, trackById]);
+  }, [globalTrack, sectionPresetCourses, trackOverrides, trackById, quickEdits]);
 
   const plannerPreviewPlan = useMemo(
     () => damagePlans.find((plan) => plan.id === plannerPreviewPlanId) || null,
