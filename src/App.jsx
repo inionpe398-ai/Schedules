@@ -442,10 +442,12 @@ function AppBody() {
   const [showModifyPanel, setShowModifyPanel] = useState(false);
   const [staffSearch, setStaffSearch] = useState("");
   const [staffCatalog, setStaffCatalog] = useState(null);
-  const [staffCatalogStatus, setStaffCatalogStatus] = useState("loading");
+  const [staffCatalogStatus, setStaffCatalogStatus] = useState("idle");
+  const staffLookupStarted = useRef(false);
   const [quickEdits, setQuickEdits] = useState({});
   const [quickEditorSession, setQuickEditorSession] = useState(null);
   const [quickDraft, setQuickDraft] = useState(null);
+  const [quickError, setQuickError] = useState("");
   const [showQuickEditor, setShowQuickEditor] = useState(false);
   const [modifyMode, setModifyMode] = useState("regular");
   const [modifyTrackId, setModifyTrackId] = useState("");
@@ -581,23 +583,21 @@ function AppBody() {
   }, [quickEdits, isHydrated]);
 
   useEffect(() => {
-    let cancelled = false;
+    if (!staffSearch.trim() || staffLookupStarted.current) return;
+    staffLookupStarted.current = true;
+    setStaffCatalogStatus("loading");
     fetch("/api/schedules?level=all", { cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error("All-level lookup unavailable");
         return response.json();
       })
       .then((payload) => {
-        if (cancelled) return;
         if (!Array.isArray(payload.courses) || !payload.courses.length) throw new Error("Empty catalog");
         setStaffCatalog(payload.courses);
         setStaffCatalogStatus("all");
       })
-      .catch(() => {
-        if (!cancelled) setStaffCatalogStatus("current");
-      });
-    return () => { cancelled = true; };
-  }, []);
+      .catch(() => setStaffCatalogStatus("current"));
+  }, [staffSearch]);
 
   useEffect(() => {
     if (!showQuickEditor) return undefined;
@@ -2452,6 +2452,7 @@ function AppBody() {
       || courses.find((course) => String(course.id) === String(session.courseId));
     const source = sourceCourse?.sessions?.find((raw) => sessionEditKey(sourceCourse.id, raw) === key) || session;
     setQuickEditorSession({ key, source, displayed: session });
+    setQuickError("");
     setQuickDraft({
       Staff: String(session.Staff || ""),
       ClassRoomName: String(session.ClassRoomName || ""),
@@ -2476,25 +2477,26 @@ function AppBody() {
 
   function saveQuickEdit() {
     if (!quickEditorSession || !quickDraft) return;
+    setQuickError("");
     const { key, source, displayed } = quickEditorSession;
     const day = String(quickDraft.DayWeekName || "").trim();
     const time = String(quickDraft.Time || "").trim();
     if (!DAYS.includes(day)) {
-      showNotice("error", "Quick Edit", "Choose a valid timetable day.");
+      setQuickError("Choose a valid timetable day.");
       return;
     }
     if (!/^\d{1,2}:[0-5]\d(?::[0-5]\d)?\s*-\s*\d{1,2}:[0-5]\d(?::[0-5]\d)?$/.test(time)) {
-      showNotice("error", "Quick Edit", "Use a time range such as 08:45 - 10:15.");
+      setQuickError("Use a time range such as 08:45 - 10:15.");
       return;
     }
     const parts = time.split("-").map((value) => value.trim());
     if (parts.some((value) => Number(value.split(":")[0]) > 23) || timeToMinutes(parts[0]) >= timeToMinutes(parts[1])) {
-      showNotice("error", "Quick Edit", "The ending time must be later than the starting time.");
+      setQuickError("The ending time must be later than the starting time.");
       return;
     }
     const next = { ...displayed, ...quickDraft, Time: time, DayWeekName: day, DayWeek: DAY_WEEK_BY_NAME[day] };
     if (!slotRange(next, currentTimeSlots)) {
-      showNotice("error", "Quick Edit", "Choose a time within the selected timetable slots.");
+      setQuickError("Choose a time within the selected timetable slots.");
       return;
     }
 
@@ -2507,6 +2509,17 @@ function AppBody() {
     if (day !== normalizeDay(source)) {
       patch.DayWeekName = day;
       patch.DayWeek = DAY_WEEK_BY_NAME[day];
+    }
+    if ((displayed.source === "track" || displayed.source === "registered" || displayed.source === "staff")
+      && (day !== normalizeDay(displayed) || time !== String(displayed.Time || "").trim())) {
+      const proposedSessions = tableSessions.map((entry) => {
+        const entryKey = entry.editSourceKey || sessionEditKey(entry.courseId, entry);
+        return entryKey === key ? { ...entry, ...next } : entry;
+      });
+      if (countSessionConflicts(proposedSessions, currentTimeSlots) > countSessionConflicts(tableSessions, currentTimeSlots)) {
+        setQuickError("That change introduces a timetable overlap. Choose another day or time.");
+        return;
+      }
     }
     setQuickEdits((previous) => {
       const updated = { ...previous };
@@ -2978,6 +2991,7 @@ function AppBody() {
                         placeholder="08:45 - 10:15" />
                       <small>Use an available timetable slot. The preset fills this automatically.</small>
                     </div>
+                    {quickError && <div className="quick-edit-error" role="alert">{quickError}</div>}
                     <div className="quick-edit-note">
                       Saved locally in this browser. Original DULMS data and other users' schedules are not changed.
                     </div>
