@@ -1,4 +1,4 @@
-import { DAYS, normalizeDay } from "./time";
+import { DAYS, normalizeDay } from "./time.js";
 
 const EDITABLE_FIELDS = ["Staff", "ClassRoomName", "GroupName", "Time", "DayWeekName"];
 
