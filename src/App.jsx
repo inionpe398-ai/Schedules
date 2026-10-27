@@ -906,6 +906,7 @@ function AppBody() {
           isModified,
           modifiedReason,
           trackSessionKey: key,
+          editSourceKey: sessionEditKey(course.id, raw),
         });
       }
     }
