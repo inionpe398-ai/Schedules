@@ -1921,3 +1921,5 @@ textarea {
 @media (prefers-reduced-motion: reduce) {
   .quick-edit-backdrop, .quick-edit-drawer, .lesson[role="button"] { animation: none; transition: none; }
 }
+
+.quick-edit-error { border: 1px solid #f0abb4; background: #fff3f4; color: #9f1239; border-radius: 10px; padding: 12px 14px; font-size: .83rem; line-height: 1.5; font-weight: 600; }
