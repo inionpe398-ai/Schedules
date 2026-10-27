@@ -2780,7 +2780,7 @@ function AppBody() {
                   })
                 }
               >
-                Modify
+                Advanced Modify
               </button>
               <button className="btn secondary" type="button" onClick={toggleFullscreen}>
                 Full Screen
@@ -2802,6 +2802,40 @@ function AppBody() {
               </button>
             </div>
           </div>
+          <div className="staff-search-bar" role="search" aria-label="Find a doctor's weekly schedule">
+            <div className="staff-search-copy">
+              <strong>Search Doctor / Staff Schedule</strong>
+              <span>Find all their lectures and sections, then click any session to edit it.</span>
+            </div>
+            <div className="staff-search-controls">
+              <input
+                type="search"
+                aria-label="Search doctor or staff name"
+                list="schedule-staff-options"
+                placeholder="Enter a doctor or staff name..."
+                value={staffSearch}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setStaffSearch(value);
+                  if (value.trim()) setDayExplorer("all");
+                }}
+              />
+              <datalist id="schedule-staff-options">
+                {staffNames.map((staff) => <option key={staff} value={staff} />)}
+              </datalist>
+              {staffSearchActive && (
+                <button type="button" className="mini" onClick={() => setStaffSearch("")}>Clear Search</button>
+              )}
+            </div>
+            <span className="staff-search-status" aria-live="polite">
+              {staffSearchActive
+                ? `${staffSessions.length} matching sessions · ${staffCatalogStatus === "all" ? "All levels" : staffCatalogStatus === "loading" ? "Loading all levels..." : "Current level only (all-level API unavailable)"}`
+                : `${staffNames.length} staff names · ${staffCatalogStatus === "all" ? "All levels available" : staffCatalogStatus === "loading" ? "Loading..." : "Current level"}`}
+            </span>
+          </div>
+          {staffSearchActive && staffSessions.length === 0 && staffCatalogStatus !== "loading" && (
+            <div className="staff-search-empty" role="status">No matching sessions found. Try another spelling or a shorter part of the name.</div>
+          )}
           <div className="combined-tables-picker" aria-label="Combined section schedules">
             <div className="combined-tables-copy">
               <strong>Combined Section Tables</strong>
@@ -2875,6 +2909,90 @@ function AppBody() {
               )}
             </div>
           </div>
+
+          {showQuickEditor && (
+            <div
+              className="quick-edit-backdrop"
+              onMouseDown={(event) => { if (event.target === event.currentTarget) setShowQuickEditor(false); }}
+            >
+              <aside className="quick-edit-drawer" role="dialog" aria-modal="true" aria-label="Edit timetable session">
+                <div className="quick-edit-top">
+                  <div>
+                    <span className="quick-edit-eyebrow">QUICK EDIT</span>
+                    <h2>Edit Session</h2>
+                    <p>Change the details and press Save. No track or session picker required.</p>
+                  </div>
+                  <button type="button" className="quick-edit-close" aria-label="Close editor" onClick={() => setShowQuickEditor(false)}>×</button>
+                </div>
+                {quickEditorSession && quickDraft && (
+                  <form className="quick-edit-form" onSubmit={(event) => { event.preventDefault(); saveQuickEdit(); }}>
+                    <div className="quick-edit-summary">
+                      <strong>{quickEditorSession.displayed.courseName}</strong>
+                      <span>{groupLabelByType(quickEditorSession.displayed.Type)} · {quickEditorSession.displayed.GroupName || "Unknown group"}</span>
+                      <span>{quickEditorSession.displayed.Type || "Session"}</span>
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-staff">Doctor / Staff</label>
+                      <input id="quick-staff" list="schedule-staff-options" value={quickDraft.Staff}
+                        onChange={(event) => setQuickDraft((prev) => ({ ...prev, Staff: event.target.value }))}
+                        placeholder="Select or type a name" />
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-group">Group / Section</label>
+                      <input id="quick-group" list="quick-group-options" value={quickDraft.GroupName}
+                        onChange={(event) => setQuickDraft((prev) => ({ ...prev, GroupName: event.target.value }))} />
+                      <datalist id="quick-group-options">{groupPresets.map((group) => <option key={group} value={group} />)}</datalist>
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-room">Hall / Room</label>
+                      <input id="quick-room" list="quick-room-options" value={quickDraft.ClassRoomName}
+                        onChange={(event) => setQuickDraft((prev) => ({ ...prev, ClassRoomName: event.target.value }))}
+                        placeholder="Select or type a hall" />
+                      <datalist id="quick-room-options">{roomPresets.map((room) => <option key={room} value={room} />)}</datalist>
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-day">Day</label>
+                      <select id="quick-day" value={quickDraft.DayWeekName}
+                        onChange={(event) => setQuickDraft((prev) => ({ ...prev, DayWeekName: event.target.value }))}>
+                        {DAYS.map((day) => <option value={day} key={day}>{day}</option>)}
+                      </select>
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-time-preset">Start Time Preset</label>
+                      <select id="quick-time-preset" value="" onChange={(event) => applyQuickTimePreset(event.target.value)}>
+                        <option value="">Choose a time (keeps session duration)</option>
+                        {currentTimeSlots.map((slot, index) => {
+                          const span = slotRange(quickEditorSession.displayed, currentTimeSlots)?.span
+                            || slotRange(quickEditorSession.source, currentTimeSlots)?.span
+                            || forcedSpanByType(quickEditorSession.source.Type);
+                          if (index + span > currentTimeSlots.length) return null;
+                          return <option key={slot} value={index}>{formatSlotLabel(slot, timeFormat)}</option>;
+                        })}
+                      </select>
+                    </div>
+                    <div className="quick-edit-field">
+                      <label htmlFor="quick-time">Time Range</label>
+                      <input id="quick-time" value={quickDraft.Time}
+                        onChange={(event) => setQuickDraft((prev) => ({ ...prev, Time: event.target.value }))}
+                        placeholder="08:45 - 10:15" />
+                      <small>Use an available timetable slot. The preset fills this automatically.</small>
+                    </div>
+                    <div className="quick-edit-note">
+                      Saved locally in this browser. Original DULMS data and other users' schedules are not changed.
+                    </div>
+                    <div className="quick-edit-actions">
+                      <button type="button" className="btn secondary" onClick={() => setShowQuickEditor(false)}>Cancel</button>
+                      <button type="submit" className="btn">Save Changes</button>
+                    </div>
+                    {quickEdits[quickEditorSession.key] && (
+                      <button type="button" className="mini danger quick-reset" onClick={resetQuickEdit}>Restore original details</button>
+                    )}
+                  </form>
+                )}
+              </aside>
+            </div>
+          )}
+
           {showModifyPanel && (
             <div className="modify-panel">
               <div className="modify-row">
@@ -3049,6 +3167,11 @@ function AppBody() {
                         return (
                           <article
                             key={`${day}-${s.courseName}-${s.GroupId}-${idx}-${s.Time}`}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Edit ${s.courseName}, ${displayGroupNameInCard(s)}, ${normalizeDay(s)} ${s.Time}`}
+                            onClick={() => openQuickEditor(s)}
+                            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openQuickEditor(s); } }}
                             className={`lesson ${blockKindByType(s.Type)} ${
                               s.source === "preview" || s.source === "planner-preview" ? "preview" : ""
                             } ${
@@ -3109,11 +3232,11 @@ function AppBody() {
                               style={combinedCourseTheme(s)}
                               title={`${s.courseName} | ${displayGroupNameInCard(s)} | ${s.Time}`}
                             >
-                              <div className="sections-day-lesson-content">
+                              <button type="button" className="sections-day-lesson-content" onClick={() => openQuickEditor(s)} aria-label={`Edit ${s.courseName}, ${displayGroupNameInCard(s)}, ${normalizeDay(s)} ${s.Time}`}>
                                 <strong>{s.courseName}</strong>
                                 <span>{displayGroupNameInCard(s)}</span>
                                 <span>{s.ClassRoomName || "N/A"}</span>
-                              </div>
+                              </button>
                             </td>
                           );
                         }
